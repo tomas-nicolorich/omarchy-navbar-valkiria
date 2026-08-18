@@ -82,6 +82,7 @@ Item {
   readonly property real avoidCenter: config.avoidCenter !== undefined
     ? Math.max(0, Math.min(0.9, Number(config.avoidCenter)))
     : 0.2
+  readonly property bool rhythm: config.rhythm !== false
   readonly property int stirEvery: Number(config.stirEvery) > 0 ? Number(config.stirEvery) : 150
   readonly property int stirFor: Number(config.stirFor) > 0 ? Number(config.stirFor) : 25
 
@@ -127,6 +128,43 @@ Item {
   property real lastPointerMoveAt: 0
   property real pettedAt: -1
   property var workspaceEvent: null
+  property real notifyAt: -1
+  property real themeChangedAt: -1
+
+  // The shell owns the notification server, so a plugin cannot run a second
+  // one — but it does not need to. `serviceFor` hands out the running service
+  // (shell.qml:275) and its popup list is deliberately aliased for exactly
+  // this: "consumers outside this Item's id scope can bind to it".
+  readonly property var notifications: shell && shell.serviceFor
+    ? shell.serviceFor("omarchy.notifications") : null
+  readonly property var popupModel: notifications && notifications.popupModel
+    ? notifications.popupModel : null
+  property int _popupCount: 0
+
+  Connections {
+    target: root.popupModel
+    function onCountChanged() {
+      var n = root.popupModel ? root.popupModel.count : 0
+      // Only an arrival is interesting; a toast expiring is not news.
+      if (n > root._popupCount && root.reactions.notification !== false) {
+        root.notifyAt = Date.now()
+        root.nudge()
+      }
+      root._popupCount = n
+    }
+  }
+
+  // A theme switch repaints the cat mid-stride, which is a good excuse to have
+  // it startle. The first assignment is the initial colour, not a change.
+  readonly property color themeInk: Color.bar.text
+  property bool _themeSeen: false
+  onThemeInkChanged: {
+    if (_themeSeen && reactions.theme !== false) {
+      themeChangedAt = Date.now()
+      nudge()
+    }
+    _themeSeen = true
+  }
 
   readonly property bool musicPlaying: {
     if (reactions.music === false) return false
@@ -305,11 +343,17 @@ Item {
       music: musicPlaying,
       charging: charging,
       workspaceEvent: workspaceEvent,
+      notifyAt: notifyAt >= 0 ? notifyAt : null,
+      notifying: reactions.notification !== false && popupModel !== null
+        && popupModel.count > 0,
+      themeChangedAt: themeChangedAt >= 0 ? themeChangedAt : null,
+      hour: new Date().getHours(),
       config: {
         chaseCursor: chaseCursor,
         pettable: pettable,
         sleepAfter: sleepAfter,
         pounce: pounce,
+        rhythm: rhythm,
         avoidCenter: avoidCenter,
         stirEvery: stirEvery,
         stirFor: stirFor,
@@ -345,6 +389,8 @@ Item {
 
     // Let a stale scamper expire so it cannot re-fire.
     if (workspaceEvent && now - workspaceEvent.at > 4000) workspaceEvent = null
+    if (notifyAt >= 0 && now - notifyAt > 20000) notifyAt = -1
+    if (themeChangedAt >= 0 && now - themeChangedAt > 4000) themeChangedAt = -1
 
     // A sleeping cat needs no frames until something wakes it, and every event
     // source above calls nudge() to start the loop again.
@@ -378,6 +424,38 @@ Item {
     if (workspace) _lastWorkspaceId = Number(workspace.id)
     nudge()
   }
+
+  // ------------------------------------------------------------- settings
+
+  // The menu is the one thing here that writes. It touches only this plugin's
+  // own entry in shell.json, only when you pick something, and it goes through
+  // the shell's own mutator rather than editing the file behind its back.
+  function setSetting(key, value) {
+    if (!shell || typeof shell.mutateShellConfig !== "function") return
+    var id = root.pluginId
+    shell.mutateShellConfig(function (cfg) {
+      if (!Array.isArray(cfg.plugins)) cfg.plugins = []
+      var entry = null
+      for (var i = 0; i < cfg.plugins.length; i++) {
+        if (cfg.plugins[i] && String(cfg.plugins[i].id || "") === id) {
+          entry = cfg.plugins[i]
+          break
+        }
+      }
+      if (!entry) {
+        entry = { id: id }
+        cfg.plugins.push(entry)
+      }
+      entry[key] = value
+    })
+  }
+
+  CatMenu {
+    id: catMenu
+    cat: root
+    onChose: function (key, value) { root.setSetting(key, value) }
+  }
+
 
   // ---------------------------------------------------------- the window
 
@@ -456,8 +534,15 @@ Item {
       MouseArea {
         anchors.fill: parent
         enabled: root.maskActive
-        acceptedButtons: Qt.LeftButton
-        onClicked: {
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: function (mouse) {
+          if (mouse.button === Qt.RightButton) {
+            catMenu.anchorPos = root.vertical
+              ? sprite.y + sprite.height / 2
+              : sprite.x + sprite.width / 2
+            catMenu.open = true
+            return
+          }
           root.pettedAt = Date.now()
           root.nudge()
         }

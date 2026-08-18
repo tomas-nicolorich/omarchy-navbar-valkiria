@@ -33,6 +33,13 @@ var POUNCE_MS = 600
 var POUNCE_COOLDOWN_MS = 6000
 // How far along the bar a pounce carries the cat.
 var POUNCE_REACH = 14
+// How long the cat keeps looking after the last toast has gone. Its attention
+// otherwise lasts exactly as long as the toast is on screen, because toasts do
+// not all last the same time — a critical one stays until dismissed, and a cat
+// that looked away on a five-second timer would be staring at nothing, or turn
+// back before it had even arrived. The bar is wide enough that crossing it
+// takes longer than a short toast lives.
+var NOTIFY_MS = 5000
 
 // The settling sequence, in order. `Infinity` terminates it.
 var CHAIN = [
@@ -112,6 +119,30 @@ function pickSpot(state, maxX, barLength, avoid) {
   return roll < lowSpan ? roll : highStart + (roll - lowSpan)
 }
 
+// Cats are crepuscular: quiet overnight, busiest around dawn and dusk. This
+// returns multipliers rather than behaviour, so the rhythm colours what the cat
+// already does instead of adding a parallel set of moods.
+//
+// An unreadable hour is treated as an ordinary day, which is what keeps every
+// test written before the rhythm existed behaving exactly as it did.
+function rhythmFor(hour) {
+  var h = Number(hour)
+  if (!isFinite(h)) return { phase: "day", sleepAfterScale: 1, stirEveryScale: 1, brisk: false }
+  h = ((Math.floor(h) % 24) + 24) % 24
+  if (h >= 23 || h < 6) return { phase: "night", sleepAfterScale: 0.3, stirEveryScale: 3, brisk: false }
+  if (h < 9) return { phase: "dawn", sleepAfterScale: 1.5, stirEveryScale: 0.5, brisk: true }
+  if (h < 17) return { phase: "day", sleepAfterScale: 1, stirEveryScale: 1, brisk: false }
+  if (h < 20) return { phase: "dusk", sleepAfterScale: 1.5, stirEveryScale: 0.5, brisk: true }
+  return { phase: "evening", sleepAfterScale: 0.6, stirEveryScale: 1.5, brisk: false }
+}
+
+function rhythmOf(input) {
+  if ((input.config || {}).rhythm === false) {
+    return { phase: "day", sleepAfterScale: 1, stirEveryScale: 1, brisk: false }
+  }
+  return rhythmFor(input.hour)
+}
+
 function chainPose(elapsed) {
   var acc = 0
   for (var i = 0; i < CHAIN.length; i++) {
@@ -143,6 +174,7 @@ function intent(input, state) {
   var reactions = config.reactions || {}
   var maxX = Math.max(0, input.barLength - input.catSize)
   var now = input.now
+  var rhythm = rhythmOf(input)
 
   // 1. Just petted.
   if (input.pettedAt !== null && input.pettedAt !== undefined
@@ -167,12 +199,43 @@ function intent(input, state) {
     }
   }
 
-  // 3. Workspace switched a moment ago.
+  // 3. Startled — by something you did, or by the world changing colour.
+  //
+  //    Both are the same movement: a short bolt and then a wait. They share a
+  //    rung rather than getting one each, because two rungs that differ only in
+  //    their reason string is two places to keep in step.
   if (reactions.workspace !== false && input.workspaceEvent
       && now - input.workspaceEvent.at < SCAMPER_MS) {
     return {
       reason: "workspace",
       target: input.x + input.workspaceEvent.dir * SCAMPER_DISTANCE,
+      gait: "run",
+      rest: "wait",
+    }
+  }
+  if (reactions.theme !== false && input.themeChangedAt !== null
+      && input.themeChangedAt !== undefined
+      && now - input.themeChangedAt < SCAMPER_MS) {
+    // No direction is implied by a theme change, so pick one.
+    var bolt = nextRandom(state) < 0.5 ? -1 : 1
+    return {
+      reason: "theme",
+      target: input.x + bolt * SCAMPER_DISTANCE,
+      gait: "run",
+      rest: "wait",
+    }
+  }
+
+  // 4. A notification just arrived. Omarchy anchors toasts to the top right, so
+  //    the nearest point on the bar is its right end — or its top, when the bar
+  //    itself is vertical.
+  if (reactions.notification !== false
+      && (input.notifying === true
+          || (input.notifyAt !== null && input.notifyAt !== undefined
+              && now - input.notifyAt < NOTIFY_MS))) {
+    return {
+      reason: "notification",
+      target: input.axis === "v" ? 0 : maxX,
       gait: "run",
       rest: "wait",
     }
@@ -189,7 +252,12 @@ function intent(input, state) {
       if (state.wanderTarget === null || state.wanderTarget === undefined) {
         state.wanderTarget = pickSpot(state, maxX, input.barLength, config.avoidCenter)
       }
-      return { reason: "stir", target: state.wanderTarget, gait: "walk", rest: "chain" }
+      return {
+        reason: "stir",
+        target: state.wanderTarget,
+        gait: rhythm.brisk ? "run" : "walk",
+        rest: "chain",
+      }
     }
     state.stirUntil = null
     state.wanderTarget = null
@@ -199,10 +267,15 @@ function intent(input, state) {
     state.nextStirAt = null
     state.stirUntil = now + (config.stirFor || 25) * 1000
     state.wanderTarget = pickSpot(state, maxX, input.barLength, config.avoidCenter)
-    return { reason: "stir", target: state.wanderTarget, gait: "walk", rest: "chain" }
+    return {
+      reason: "stir",
+      target: state.wanderTarget,
+      gait: rhythm.brisk ? "run" : "walk",
+      rest: "chain",
+    }
   }
 
-  // 4. Something is playing — dance, wherever the cat happens to be.
+  // 5. Something is playing — dance, wherever the cat happens to be.
   //
   //    This sits above the charging rung, and the ordering matters more than it
   //    looks. Charging is a *sleepy* rung: it returns and the cat nods off. Put
@@ -219,7 +292,7 @@ function intent(input, state) {
     }
   }
 
-  // 5. On AC power — get drowsy, and sleep wherever it happens to be.
+  // 6. On AC power — get drowsy, and sleep wherever it happens to be.
   //
   //    This used to march the cat to the right third of the bar, on the theory
   //    that it was napping by the power widget. In practice it meant the cat
@@ -236,8 +309,9 @@ function intent(input, state) {
     }
   }
 
-  // 6. Nobody has touched the pointer in a long while.
-  if (now - input.lastPointerMoveAt > (config.sleepAfter || 180) * 1000) {
+  // 7. Nobody has touched the pointer in a long while.
+  if (now - input.lastPointerMoveAt
+      > (config.sleepAfter || 180) * 1000 * rhythm.sleepAfterScale) {
     return {
       reason: "idle-sleep",
       target: input.x,
@@ -247,12 +321,17 @@ function intent(input, state) {
     }
   }
 
-  // 7. Nothing in particular. Wander, and re-roll once the cat has finished
+  // 8. Nothing in particular. Wander, and re-roll once the cat has finished
   //    dawdling wherever it arrived.
   if (state.wanderTarget === null || state.wanderTarget === undefined) {
     state.wanderTarget = pickSpot(state, maxX, input.barLength, config.avoidCenter)
   }
-  return { reason: "wander", target: state.wanderTarget, gait: "walk", rest: "chain" }
+  return {
+    reason: "wander",
+    target: state.wanderTarget,
+    gait: rhythm.brisk ? "run" : "walk",
+    rest: "chain",
+  }
 }
 
 // The frame for a diagonal leap. Which diagonal depends on the edge the bar is
@@ -406,7 +485,7 @@ function decide(input, state) {
   // forever.
   if (pose === "sleep"
       && (state.nextStirAt === null || state.nextStirAt === undefined)) {
-    var average = (config.stirEvery || 150) * 1000
+    var average = (config.stirEvery || 150) * 1000 * rhythmOf(input).stirEveryScale
     state.nextStirAt = now + average * (0.6 + 0.8 * nextRandom(state))
   }
 

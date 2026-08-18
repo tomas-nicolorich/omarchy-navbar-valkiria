@@ -15,7 +15,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(join(REPO, "Brain.js"), "utf8");
 const Brain = new Function(
   `${source}\nreturn { decide, freshState, pickSpot, CHAIN, PET_MS, PET_PERK_MS,`
-    + ` AWAKE_MS, SCAMPER_MS, POUNCE_MS, POUNCE_COOLDOWN_MS };`,
+    + ` AWAKE_MS, SCAMPER_MS, POUNCE_MS, POUNCE_COOLDOWN_MS, NOTIFY_MS, rhythmFor };`,
 )();
 
 // The middle of the bar, in cat-position terms, and the default keep-clear
@@ -724,4 +724,132 @@ test("a bar with no room outside the middle still yields a valid spot", () => {
     const x = Brain.pickSpot(state, maxX, len, 0.9);
     assert.ok(x >= 0 && x <= Math.max(0, maxX) && Number.isFinite(x), `got ${x}`);
   }
+});
+
+
+// --------------------------------------------------------------- notifications
+
+test("a notification sends the cat to the end of the bar nearest the toast", () => {
+  // Omarchy anchors toasts top-right, so on a horizontal bar that is the right
+  // end; on a vertical bar it is the top.
+  const out = decide({ notifyAt: 9_900, x: 200 });
+  assert.equal(out.reason, "notification");
+  assert.equal(out.gait, "run");
+  assert.equal(out.target, BAR - CAT, "should head for the right end");
+
+  const vertical = decide({ axis: "v", notifyAt: 9_900, x: 500 });
+  assert.equal(vertical.target, 0, "on a vertical bar the toast is at the top");
+});
+
+test("having arrived under the toast the cat sits and watches", () => {
+  const out = decide({ notifyAt: 9_900, x: BAR - CAT });
+  assert.equal(out.reason, "notification");
+  assert.equal(out.gait, "idle");
+  assert.equal(out.pose, "stop", "it should watch, not fall asleep");
+});
+
+test("the notification wears off once the toast has gone", () => {
+  const out = decide({ notifyAt: 10_000 - Brain.NOTIFY_MS - 1, x: 200 });
+  assert.notEqual(out.reason, "notification");
+});
+
+test("a toast still on screen holds the cat's attention", () => {
+  // The bar is wider than a short toast lives: at a run the cat needs about ten
+  // seconds to cross it, and a low-priority toast is gone in five. Attention is
+  // therefore tied to the toast actually being there, not to a timer, so a
+  // long-lived or critical toast is still watched and the cat is not left
+  // turning back halfway.
+  const stale = 10_000 - Brain.NOTIFY_MS * 10;
+  const out = decide({ notifying: true, notifyAt: stale, x: 200 });
+  assert.equal(out.reason, "notification", "still on screen, still interesting");
+
+  const gone = decide({ notifying: false, notifyAt: stale, x: 200 });
+  assert.notEqual(gone.reason, "notification");
+});
+
+test("notifications outrank music and charging, but not you", () => {
+  assert.equal(decide({ notifyAt: 9_900, music: true, charging: true }).reason, "notification");
+  assert.equal(
+    decide({ notifyAt: 9_900, pointer: { onBar: true, pos: 100 } }).reason, "chase",
+    "your pointer still wins",
+  );
+});
+
+test("notifications can be switched off", () => {
+  const out = decide({
+    notifyAt: 9_900,
+    config: { ...input().config, reactions: { notification: false } },
+  });
+  assert.notEqual(out.reason, "notification");
+});
+
+// ------------------------------------------------------------- theme startle
+
+test("switching theme startles the cat into a run", () => {
+  const out = decide({ themeChangedAt: 9_800, x: 500 });
+  assert.equal(out.reason, "theme");
+  assert.equal(out.gait, "run");
+  assert.notEqual(out.target, 500, "it should bolt somewhere");
+});
+
+test("a stale theme change stops mattering", () => {
+  assert.notEqual(decide({ themeChangedAt: 1_000 }).reason, "theme");
+});
+
+test("a workspace switch outranks a theme change", () => {
+  const out = decide({
+    themeChangedAt: 9_800,
+    workspaceEvent: { at: 9_800, dir: 1 },
+    x: 500,
+  });
+  assert.equal(out.reason, "workspace", "a thing you did beats a thing that happened");
+});
+
+// -------------------------------------------------------- crepuscular rhythm
+
+test("the day has phases, and they are the ones cats keep", () => {
+  const phases = [0, 3, 5].map((h) => Brain.rhythmFor(h).phase);
+  assert.deepEqual(phases, ["night", "night", "night"]);
+  assert.equal(Brain.rhythmFor(7).phase, "dawn");
+  assert.equal(Brain.rhythmFor(12).phase, "day");
+  assert.equal(Brain.rhythmFor(18).phase, "dusk");
+  assert.equal(Brain.rhythmFor(21).phase, "evening");
+  assert.equal(Brain.rhythmFor(23).phase, "night");
+});
+
+test("dawn and dusk are the brisk ones", () => {
+  assert.equal(Brain.rhythmFor(7).brisk, true);
+  assert.equal(Brain.rhythmFor(18).brisk, true);
+  assert.equal(Brain.rhythmFor(12).brisk, false);
+  assert.equal(Brain.rhythmFor(2).brisk, false);
+});
+
+test("at night the cat gives up on the day sooner", () => {
+  // Same idle gap, different hour: asleep at night, still pottering by day.
+  const idle = { lastPointerMoveAt: 10_000, now: 10_000 + 70_000, x: 500 };
+  const night = decide({ ...idle, hour: 2 });
+  const day = decide({ ...idle, hour: 12 });
+  assert.equal(night.reason, "idle-sleep", "70s of quiet is enough at 2am");
+  assert.equal(day.reason, "wander", "but not at midday");
+});
+
+test("a brisk cat wanders at a run", () => {
+  assert.equal(decide({ hour: 7 }).gait, "run", "dawn zoomies");
+  assert.equal(decide({ hour: 12 }).gait, "walk", "ordinary daytime amble");
+});
+
+test("the rhythm can be switched off", () => {
+  const config = { ...input().config, rhythm: false };
+  const idle = { lastPointerMoveAt: 10_000, now: 10_000 + 70_000, x: 500, config };
+  assert.equal(decide({ ...idle, hour: 2 }).reason, "wander", "night no longer special");
+  assert.equal(decide({ hour: 7, config }).gait, "walk", "and dawn is not brisk");
+});
+
+test("an unknown hour behaves like an ordinary day", () => {
+  // Every older test omits `hour`; none of them should change behaviour.
+  const r = Brain.rhythmFor(undefined);
+  assert.equal(r.phase, "day");
+  assert.equal(r.sleepAfterScale, 1);
+  assert.equal(r.stirEveryScale, 1);
+  assert.equal(r.brisk, false);
 });

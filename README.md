@@ -17,7 +17,9 @@ asleep.
 | When | The cat |
 |---|---|
 | You move the pointer onto the bar | runs to it, then **pounces** at it |
+| A notification appears | trots over to it and sits watching until it goes |
 | You switch workspace | scampers in the direction you switched |
+| You change theme | startles, bolts a little way, recolours to match |
 | You plug in the charger | gets drowsy and naps where it is |
 | Something is playing | dances on the spot |
 | You leave for a few minutes | settles down and falls asleep |
@@ -32,12 +34,36 @@ Those reactions are a priority order, not a list — the first one that applies
 wins. Anything that wakes the cat beats anything that puts it to sleep:
 
 ```
-petted  >  pointer  >  workspace  >  music  >  charging  >  idle  >  wander
-└──────────── awake ────────────┘   └───── asleep ─────┘
+petted > pointer > startled > notification > music > charging > idle > wander
+└─────────────── awake ──────────────────┘   └────── asleep ──────┘
 ```
 
 So music still gets the cat bobbing while you are on mains power, but moving
 your pointer to the bar interrupts it — the cat would rather come to you.
+
+## The shape of a day
+
+Cats are crepuscular, and so is this one. The rhythm changes how readily it
+settles and how briskly it moves, using the same frames throughout:
+
+| | |
+|---|---|
+| 23:00–06:00 | sleeps sooner, and rarely gets up |
+| 06:00–09:00 | dawn — wanders more, at a run |
+| 09:00–17:00 | ordinary |
+| 17:00–20:00 | dusk — frisky again |
+| 20:00–23:00 | winding down |
+
+Set `rhythm: false` for a cat that behaves the same at 4am as at 4pm.
+
+## Right-click menu
+
+Right-click a **settled** cat to change its character, or toggle pouncing and
+cursor-chasing. A walking cat has no input region to click, which is the same
+rule that governs petting.
+
+Menu choices are written to this plugin's own entry in `shell.json` through the
+shell's own config mechanism, so they survive a restart.
 
 ## Characters
 
@@ -88,9 +114,13 @@ omarchy-shell shell rescanPlugins
 ```
 
 Disabling removes the plugin's entry from `~/.config/omarchy/shell.json`, which
-takes your settings with it. The cat leaves nothing else behind: it writes no
-files, no state, and no config of its own, and its helper process exits with
-the shell.
+takes your settings with it. The cat leaves nothing else behind: it creates no
+files of its own, keeps no state or cache anywhere, and its helper process
+exits with the shell.
+
+The one thing it ever writes is its own entry in `shell.json`, and only when
+you pick something from the right-click menu. It goes through the shell's own
+config mechanism and touches no other plugin's settings.
 
 ## Configuration
 
@@ -107,12 +137,16 @@ Settings go inline on the plugin's entry in `~/.config/omarchy/shell.json`:
       "pettable": true,
       "chaseCursor": true,
       "pounce": true,
+      "rhythm": true,
       "avoidCenter": 0.2,
       "sleepAfter": 180,
       "stirEvery": 150,
       "stirFor": 25,
       "monitor": "focused",
-      "reactions": { "music": true, "charging": true, "workspace": true }
+      "reactions": {
+        "music": true, "charging": true, "workspace": true,
+        "notification": true, "theme": true
+      }
     }
   ]
 }
@@ -126,12 +160,13 @@ Settings go inline on the plugin's entry in `~/.config/omarchy/shell.json`:
 | `pettable` | `true` | Whether the cat can be clicked |
 | `chaseCursor` | `true` | Whether the cat comes when you visit the bar |
 | `pounce` | `true` | Whether it leaps at the pointer (see below) |
+| `rhythm` | `true` | Whether the cat follows a day/night rhythm |
 | `avoidCenter` | `0.2` | Fraction of the bar's middle to keep clear of the clock; `0` disables |
 | `sleepAfter` | `180` | Seconds of pointer stillness before it sleeps |
 | `stirEvery` | `150` | Roughly how often a sleeping cat gets up, in seconds |
 | `stirFor` | `25` | How long it potters about before settling again |
 | `monitor` | `"focused"` | `"focused"` to follow you, or an output name to pin it |
-| `reactions` | all on | Individually disable the music, charging, or workspace reactions |
+| `reactions` | all on | Individually disable the music, charging, workspace, notification, or theme reactions |
 
 ### About the pounce
 
@@ -163,6 +198,7 @@ timer, and the pointer sampler slows down to match.
 |---|---|
 | `Cat.qml` | The panel: window, monitor tracking, event sources, tick loop |
 | `CatSprite.qml` | Frame selection, sheet choice, two-tone theming |
+| `CatMenu.qml` | The right-click menu surface |
 | `Brain.js` | All the behaviour, as a pure function — the tested part |
 | `bin/navbar-cat-cursor` | Pointer sampler |
 | `tools/build-sprites.py` | XBM → spritesheets (only needed to change the art) |
@@ -184,6 +220,13 @@ Asking via `hyprctl` costs ~8ms per sample — 8% of a core at 10Hz, which is an
 absurd price for a cat. `bin/navbar-cat-cursor` makes the same request straight
 to the Hyprland socket for ~0.03ms, which is 285× cheaper and the reason this
 feature exists at all.
+
+**It watches notifications without owning them.** The shell runs the
+notification server, so a plugin cannot run a second one — but it does not need
+to. `shell.serviceFor("omarchy.notifications")` hands back the running service,
+whose popup list is deliberately exposed for outside consumers. A happy
+side-effect: because that list respects Do Not Disturb, a silenced machine gets
+a silent cat, without a line of code spent on it.
 
 **The cat does not know where your widgets are.** Nothing in the bar exposes
 widget geometry, so the cat cannot see your clock — it only assumes one is
