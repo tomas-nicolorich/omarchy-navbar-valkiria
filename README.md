@@ -1,5 +1,7 @@
 # Navbar Cat
 
+[![Listed on omarchyplugins.com](https://img.shields.io/badge/omarchyplugins.com-Navbar%20Cat-4c9?style=flat-square)](https://omarchyplugins.com/plugin.html?id=io.github.tallsam.navbar-cat)
+
 A cat that walks along the Omarchy bar.
 
 It roams the full width of the bar, reacts to what your machine is doing, takes
@@ -48,6 +50,9 @@ Three sprite sets ship, all from oneko and all with the same 32 frames:
 | `dog` | a dog, for people who are wrong about cats |
 
 ## Install
+
+Listed in the community plugin directory:
+**[omarchyplugins.com › Navbar Cat](https://omarchyplugins.com/plugin.html?id=io.github.tallsam.navbar-cat)**
 
 ```bash
 omarchy plugin add https://github.com/tallsam/omarchy-navbar-cat.git --enable --yes
