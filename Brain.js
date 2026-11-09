@@ -27,6 +27,8 @@ var WRIGGLE_MS = 1200
 var STRETCH_MS = 2000
 var CLICK_WAG_MS = 2500
 var CLICK_HOVER_MS = 2000
+var TREAT_WIGGLE_MS = 1200
+var TREAT_WAG_MS = 3000
 // Chance that a workspace switch also sends her on a walk.
 var WORKSPACE_WALK_P = 0.35
 // A meal lasts this long from its time.
@@ -61,7 +63,7 @@ function freshState(seed) {
     lastPose: null,
     facing: 1,
     settled: false,
-    seen: { greet: -1, notify: -1, theme: -1, workspace: -1, click: -1 },
+    seen: { greet: -1, notify: -1, theme: -1, workspace: -1, click: -1, command: -1 },
   }
 }
 
@@ -284,6 +286,10 @@ function walkiesDue(input, state, ctx) {
 function standing(input, ctx) {
   var idleFor = Number(input.idleFor) || 0
   var config = input.config || {}
+  if (ctx.dnd) return { want: "nap", reason: "dnd" }
+  // Menu: Bedtime puts her to bed whatever the clock says; Wake up ("up")
+  // keeps her up through the night until the sleep window has passed.
+  if (input.bedtime === "bed") return { want: "nap", reason: "bedtime" }
   if (ctx.react("music") && input.music === true) return { want: "music" }
   if (ctx.react("charging") && input.charging === true) return { want: "nap", reason: "charging" }
   if (ctx.react("idle") && idleFor >= Number(setting(config, "idleBurrowAfter")) * 1000) {
@@ -293,7 +299,9 @@ function standing(input, ctx) {
       && idleFor >= Number(setting(config, "siestaBurrowAfter")) * 1000) {
     return { want: "nap", reason: "siesta" }
   }
-  if (inRange(ctx.minutes, ctx.sleepRange)) return { want: "nap", reason: "night" }
+  if (inRange(ctx.minutes, ctx.sleepRange) && input.bedtime !== "up") {
+    return { want: "nap", reason: "night" }
+  }
   return { want: "free" }
 }
 
@@ -345,9 +353,28 @@ function takeEvents(input, state, ctx) {
     }
   }
 
+  var cmd = input.command
+  if (cmd && cmd.at > seen.command) {
+    seen.command = cmd.at
+    if (!ctx.dnd && !busyGreeting) {
+      if (cmd.kind === "walkies") {
+        state.lastWalkiesDay = input.day
+        var walk = walkiesScript(input, ctx)
+        walk.want = "any"
+        if (underBlanket(state.act)) walk.steps.unshift(hold("wriggle", WRIGGLE_MS))
+        state.act = walk
+        state.beat = null
+      } else if (cmd.kind === "treat") {
+        state.act = script("treat", [hold("wriggle", TREAT_WIGGLE_MS), hold("wag", TREAT_WAG_MS)],
+          { want: "any" })
+        state.beat = null
+      }
+    }
+  }
+
   if (input.clickedAt !== null && input.clickedAt !== undefined && input.clickedAt > seen.click) {
     seen.click = input.clickedAt
-    if (state.settled && !state.beat) {
+    if (state.settled && !state.beat && !ctx.dnd) {
       if (underBlanket(state.act)) {
         // A sleepy peek, then back under.
         state.beat = { steps: [{ pose: "wriggle", ms: PEEK_MS }], t0: now, settled: true }
@@ -450,6 +477,10 @@ function decide(input, state) {
   var dt = state.lastNow === null ? 0 : Math.max(0, now - state.lastNow)
   state.lastNow = now
   var speedScale = ctx.low ? 0.5 : 1
+  var standingNow = standing(input, ctx)
+  ctx.sleeping = standingNow.want === "nap"
+    && (standingNow.reason === "bedtime" || standingNow.reason === "night")
+  ctx.clearBedtime = input.bedtime === "up" && !inRange(ctx.minutes, ctx.sleepRange)
 
   takeEvents(input, state, ctx)
 
@@ -468,7 +499,6 @@ function decide(input, state) {
     state.beat = null
   }
 
-  var standingNow = standing(input, ctx)
   reconcile(state, standingNow)
   if (state.tripWanted !== null && state.act && state.act.kind === "yard") state.act = null
   if (ctx.low || state.act && (state.act.kind === "nap" || state.act.kind === "music")) {
@@ -519,6 +549,11 @@ function output(state, ctx, reason, harness, target, gait, pose, facing, settled
     harness: harness === true,
     speedScale: speedScale,
     wakeIn: wakeIn,
+    // For the menu: she is asleep (or about to be) by bedtime or the clock, so
+    // it should offer Wake up rather than Bedtime.
+    sleeping: ctx.sleeping,
+    // A Wake-up override that has outlived the night; the body can drop it.
+    clearBedtime: ctx.clearBedtime,
     state: state,
   }
 }

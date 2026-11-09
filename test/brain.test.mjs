@@ -481,18 +481,125 @@ test("a click under the blanket gets one sleepy peek, then she is back under", (
   assert.equal(sim.last.pose, "blanket");
 });
 
-test("do not disturb overrides every reaction", () => {
+test("do not disturb overrides every reaction (music, charging, idle all lose)", () => {
   const sim = new Sim({ seed: 3 }).set({ dnd: true, music: true, charging: true, idleFor: 10 * MIN });
   sim.run(MIN, 100);
   sim.set({ notifyAt: sim.t + 1, themeChangedAt: sim.t + 1,
     greet: { at: sim.t + 1, awayMs: 10 * MIN } });
   sim.run(30_000);
   const seen = new Set(sim.poses());
-  for (const p of ["bark", "run", "blanket", "slump"]) {
-    if (p === "slump") continue; // slump is also ordinary yard life
-    assert.ok(!seen.has(p), `reacted with ${p}`);
-  }
-  assert.ok(!sim.trace.some((r) => r.reason === "music"));
+  for (const p of ["bark", "run", "slump", "wag"]) assert.ok(!seen.has(p), `reacted with ${p}`);
+  assert.ok(!sim.trace.some((r) => r.reason === "music" || r.reason === "charging"));
+});
+
+test("do not disturb: she goes under the blanket and stays there, any time of day", () => {
+  const sim = new Sim({ seed: 3 }).set({ dnd: true });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  assert.equal(sim.last.reason, "dnd");
+  sim.set({ notifyAt: sim.t + 1, themeChangedAt: sim.t + 1, clickedAt: sim.t + 1,
+    workspaceEvent: { at: sim.t + 1, dir: 1 }, greet: { at: sim.t + 1, awayMs: 10 * MIN } });
+  const from = sim.trace.length;
+  sim.run(MIN);
+  assert.ok(sim.trace.slice(from).every((r) => r.pose === "blanket"));
+});
+
+test("turning do not disturb off wakes her", () => {
+  const sim = new Sim({ seed: 3 }).set({ dnd: true });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.set({ dnd: false });
+  sim.until((o) => o.pose === "wriggle", 5000);
+  sim.until((o) => o.pose !== "wriggle" && o.pose !== "stretch" && o.pose !== "blanket", MIN);
+});
+
+// ------------------------------------------------------------ menu verbs
+
+test("bedtime at midday: she goes home and sleeps, and says she is sleeping", () => {
+  const sim = new Sim({ seed: 4 }).set({ bedtime: "bed" });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  assert.equal(sim.last.reason, "bedtime");
+  assert.equal(sim.last.sleeping, true);
+  assert.ok(inYard(sim.x));
+});
+
+test("bedtime is still on after hours, until Wake up", () => {
+  const sim = new Sim({ seed: 4 }).set({ bedtime: "bed" });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.run(2 * HOUR, 1000);
+  assert.equal(sim.last.pose, "blanket");
+  sim.set({ bedtime: "up" });
+  sim.until((o) => o.pose === "wriggle", 5000);
+  assert.equal(sim.last.sleeping, false);
+  assert.equal(sim.last.clearBedtime, true);
+});
+
+test("Wake up at night keeps her up, and the override clears once it is day", () => {
+  const sim = new Sim({ seed: 4 }).at(2, 0);
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  assert.equal(sim.last.sleeping, true);
+  sim.set({ bedtime: "up" });
+  sim.until((o) => o.pose === "wriggle", 5000);
+  sim.run(10 * MIN, 1000);
+  assert.notEqual(sim.last.pose, "blanket");
+  assert.equal(sim.last.clearBedtime, false, "still night: keep the override");
+  sim.at(9, 30);
+  assert.equal(sim.tick().clearBedtime, true);
+});
+
+test("Walkies now: she goes the whole length of the bar in her harness, then home", () => {
+  const sim = new Sim({ seed: 5 });
+  sim.tick();
+  sim.set({ command: { at: sim.t + 1, kind: "walkies" } });
+  sim.tick();
+  const from = sim.trace.length - 1;
+  sim.until((o) => o.settled && o.reason !== "walkies", 10 * MIN);
+  const xs = sim.trace.slice(from).map((r) => r.x);
+  assert.ok(Math.min(...xs) < 10 && Math.max(...xs) > BAR - CAT - 10, "both ends of the bar");
+  assert.ok(sim.trace.slice(from).some((r) => r.harness));
+  assert.ok(inYard(sim.x));
+});
+
+test("Walkies now from under the blanket: she wriggles out first", () => {
+  const sim = new Sim({ seed: 5 }).at(2, 0).set({ bedtime: "up" });
+  sim.run(MIN);
+  sim.set({ bedtime: "bed" });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.set({ command: { at: sim.t + 1, kind: "walkies" }, bedtime: "up" });
+  const from = sim.trace.length;
+  sim.run(3000);
+  assert.equal(sim.trace[from].pose, "wriggle");
+  sim.until((o) => o.gait === "walk" && o.harness, MIN);
+});
+
+test("Treat: a happy wiggle and wag, then back to normal", () => {
+  const sim = new Sim({ seed: 6 });
+  sim.until((o) => o.settled && o.pose !== "wag" && o.pose !== "wriggle");
+  sim.set({ command: { at: sim.t + 1, kind: "treat" } });
+  assert.equal(sim.tick().pose, "wriggle");
+  sim.until((o) => o.pose === "wag", 5000);
+  sim.run(10_000);
+  assert.notEqual(sim.last.reason, "treat");
+});
+
+test("a command is consumed once", () => {
+  const sim = new Sim({ seed: 6 });
+  sim.tick();
+  const command = { at: sim.t + 1, kind: "treat" };
+  sim.set({ command });
+  sim.tick();
+  sim.run(15_000);
+  const from = sim.trace.length;
+  sim.run(60_000);
+  assert.ok(!sim.trace.slice(from).some((r) => r.reason === "treat"));
+});
+
+test("do not disturb ignores treats and walkies", () => {
+  const sim = new Sim({ seed: 6 }).set({ dnd: true });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.set({ command: { at: sim.t + 1, kind: "treat" } });
+  sim.run(10_000);
+  sim.set({ command: { at: sim.t + 1, kind: "walkies" } });
+  sim.run(10_000);
+  assert.equal(sim.last.pose, "blanket");
 });
 
 // -------------------------------------------------------------- battery
