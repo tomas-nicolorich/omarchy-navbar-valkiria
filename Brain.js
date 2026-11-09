@@ -470,6 +470,99 @@ function beatStep(beat, now) {
   return null
 }
 
+// ------------------------------------------------------------- monitors
+//
+// One Valkiria, on the monitor Hyprland has focused. Focus has to rest on a
+// new monitor for FOLLOW_DEBOUNCE_MS before she goes, so skimming across
+// screens does not send her back and forth. Then she walks off the end of the
+// old bar nearest to her, and walks in from the other end of the new one
+// (leaving right, she arrives from the left, as if the screens sit side by side).
+//
+// `mstate` is carried between calls (pass null the first time). Input:
+// { now, focused, screens: [names], dnd, x, barLength, catSize }. Returns
+// { mstate, screen, transit, switched }: `screen` is the monitor she is drawn
+// on; `transit` is null or { phase: "leave"|"enter", side: -1|1 } for decide();
+// `switched` is true on the one call where the screen changes mid-walk and the
+// body must put her at the entry edge (x = -catSize for side -1, barLength for 1).
+
+var FOLLOW_DEBOUNCE_MS = 3000
+
+function freshFollow() {
+  return { screen: null, phase: "here", side: -1, to: null, pending: null }
+}
+
+function followStep(prev, input) {
+  var m = {}
+  var base = prev || freshFollow()
+  for (var k in base) m[k] = base[k]
+  var screens = input.screens || []
+  var known = function (name) { return screens.indexOf(name) !== -1 }
+  var focused = known(input.focused) ? input.focused : null
+  var maxX = Math.max(0, input.barLength - input.catSize)
+  var switched = false
+
+  // First sight, or the monitor she was on has been unplugged: no walk.
+  if (m.screen === null || !known(m.screen)) {
+    m.screen = focused !== null ? focused : (screens.length > 0 ? screens[0] : null)
+    m.phase = "here"
+    m.pending = null
+    m.to = null
+    return { mstate: m, screen: m.screen, transit: null, switched: false }
+  }
+
+  if (m.phase === "here") {
+    if (input.dnd === true || focused === null || focused === m.screen) {
+      m.pending = null
+    } else if (m.pending && m.pending.name === focused) {
+      if (input.now - m.pending.since >= FOLLOW_DEBOUNCE_MS) {
+        m.phase = "leaving"
+        m.to = focused
+        m.side = input.x < maxX / 2 ? -1 : 1
+        m.pending = null
+      }
+    } else {
+      m.pending = { name: focused, since: input.now }
+    }
+  } else if (m.phase === "leaving") {
+    if (input.dnd === true || focused === null || focused === m.screen) {
+      // Changed her mind: the walk is off and she carries on where she is.
+      m.phase = "here"
+      m.to = null
+    } else {
+      m.to = focused
+      var gone = m.side < 0 ? input.x <= -input.catSize + ARRIVE_EPS : input.x >= input.barLength - ARRIVE_EPS
+      if (gone) {
+        m.screen = m.to
+        m.to = null
+        m.phase = "entering"
+        m.side = -m.side
+        switched = true
+      }
+    }
+  } else if (m.phase === "entering") {
+    if (!switched && input.x >= 0 && input.x <= maxX) m.phase = "here"
+  }
+
+  var transit = null
+  if (m.phase === "leaving") transit = { phase: "leave", side: m.side }
+  else if (m.phase === "entering") transit = { phase: "enter", side: m.side }
+  return { mstate: m, screen: m.screen, transit: transit, switched: switched }
+}
+
+// Where the brain walks her while a monitor change is in progress.
+function transitDecision(input, state, ctx) {
+  var t = input.transit
+  var target
+  if (t.phase === "leave") target = t.side < 0 ? -input.catSize : input.barLength
+  else target = t.side < 0 ? ctx.span.lo : ctx.span.hi
+  state.act = null
+  state.beat = null
+  state.facing = target < input.x ? -1 : 1
+  state.lastPose = "walk"
+  state.settled = false
+  return output(state, ctx, "transit", false, target, "walk", "walk", state.facing, false, 1, 0)
+}
+
 function decide(input, state) {
   state = state || freshState()
   var now = input.now
@@ -481,6 +574,9 @@ function decide(input, state) {
   ctx.sleeping = standingNow.want === "nap"
     && (standingNow.reason === "bedtime" || standingNow.reason === "night")
   ctx.clearBedtime = input.bedtime === "up" && !inRange(ctx.minutes, ctx.sleepRange)
+
+  // Changing monitors comes before everything: she is not here to be asked.
+  if (input.transit) return transitDecision(input, state, ctx)
 
   takeEvents(input, state, ctx)
 

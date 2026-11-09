@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(join(REPO, "Brain.js"), "utf8");
 const Brain = new Function(
-  `${source}\nreturn { decide, freshState, yardSpan, WALK_PX_S, RUN_PX_S };`,
+  `${source}\nreturn { decide, freshState, yardSpan, followStep, WALK_PX_S, RUN_PX_S };`,
 )();
 
 const BAR = 1536;
@@ -600,6 +600,159 @@ test("do not disturb ignores treats and walkies", () => {
   sim.set({ command: { at: sim.t + 1, kind: "walkies" } });
   sim.run(10_000);
   assert.equal(sim.last.pose, "blanket");
+});
+
+// ------------------------------------------------------------- monitors
+
+const SCREENS = ["eDP-1", "DP-2"];
+
+// Drives the follower and the brain together, the way Valkiria.qml does.
+class Trip {
+  constructor(over = {}) {
+    this.t = 5_000_000;
+    this.focused = "eDP-1";
+    this.x = 630;
+    this.dnd = false;
+    this.m = null;
+    this.state = Brain.freshState(over.seed ?? 8);
+    this.log = [];
+    this.screen = null;
+    this.tick(100);
+  }
+  tick(dt = 100) {
+    this.t += dt;
+    const f = Brain.followStep(this.m, {
+      now: this.t, focused: this.focused, screens: SCREENS, dnd: this.dnd,
+      x: this.x, barLength: BAR, catSize: CAT,
+    });
+    this.m = f.mstate;
+    if (f.switched) this.x = f.transit.side < 0 ? -CAT : BAR;
+    this.screen = f.screen;
+    const out = Brain.decide({
+      now: this.t, axis: "h", barLength: BAR, catSize: CAT, x: this.x, yard: YARD,
+      ...NOON, idleFor: 0, music: false, charging: false, batteryPct: 80, dnd: this.dnd,
+      greet: null, notifyAt: null, themeChangedAt: null, workspaceEvent: null,
+      clickedAt: null, config: {}, transit: f.transit,
+    }, this.state);
+    if (out.gait !== "idle") {
+      const px = Brain.WALK_PX_S * (dt / 1000);
+      const d = out.target - this.x;
+      this.x = Math.abs(d) <= px ? out.target : this.x + Math.sign(d) * px;
+      this.x = Math.max(-CAT, Math.min(BAR, this.x));
+    }
+    this.log.push({ t: this.t, x: this.x, screen: f.screen, transit: f.transit, ...out });
+    return out;
+  }
+  run(ms, dt = 100) { const end = this.t + ms; while (this.t < end) this.tick(dt); return this; }
+}
+
+test("monitors: on first sight she is simply on the focused monitor", () => {
+  const trip = new Trip();
+  assert.equal(trip.screen, "eDP-1");
+  assert.equal(trip.log[0].transit, null);
+});
+
+test("monitors: focus moving to another monitor does nothing until the debounce passes", () => {
+  const trip = new Trip();
+  trip.focused = "DP-2";
+  trip.run(2500);
+  assert.ok(trip.log.every((r) => r.screen === "eDP-1" && !r.transit));
+});
+
+test("monitors: focus moves away and straight back inside the debounce: she never stirs", () => {
+  const trip = new Trip();
+  trip.focused = "DP-2";
+  trip.run(2000);
+  trip.focused = "eDP-1";
+  trip.run(10_000);
+  trip.focused = "DP-2";
+  trip.run(2000);
+  trip.focused = "eDP-1";
+  trip.run(10_000);
+  assert.ok(trip.log.every((r) => r.screen === "eDP-1" && !r.transit));
+});
+
+test("monitors: after the debounce she walks off the near edge, then in from the other bar's edge, then to its yard", () => {
+  const trip = new Trip();
+  trip.focused = "DP-2";
+  trip.run(3200);
+  const leave = trip.log.find((r) => r.transit);
+  assert.equal(leave.transit.phase, "leave");
+  assert.equal(leave.screen, "eDP-1");
+  assert.equal(leave.gait, "walk");
+  // x = 630 is left of the middle, so the near edge is the left one.
+  assert.equal(leave.transit.side, -1);
+  trip.run(40_000);
+  const entered = trip.log.find((r) => r.screen === "DP-2");
+  assert.ok(entered, "she arrived on the other monitor");
+  // She was off the old bar's edge when the screen changed, and re-entered at
+  // the far edge of the new one.
+  const before = trip.log[trip.log.indexOf(entered) - 1];
+  assert.ok(before.x <= -CAT + 2);
+  assert.equal(entered.transit.phase, "enter");
+  // Over the whole trip she is never reported settled until she is in the yard.
+  const from = trip.log.indexOf(leave);
+  const tripLog = trip.log.slice(from);
+  const firstSettled = tripLog.find((r) => r.settled);
+  assert.ok(inYard(firstSettled.x), `first settled at ${firstSettled.x}`);
+  assert.equal(firstSettled.screen, "DP-2");
+  assert.ok(tripLog.filter((r) => r.screen === "DP-2").every((r) => r.x >= -CAT));
+});
+
+test("monitors: from the right half she leaves by the right edge", () => {
+  const trip = new Trip();
+  trip.x = 1300;
+  trip.focused = "DP-2";
+  trip.run(3200);
+  assert.equal(trip.log.find((r) => r.transit).transit.side, 1);
+});
+
+test("monitors: focus returns while she is leaving: she turns round and stays", () => {
+  const trip = new Trip();
+  trip.focused = "DP-2";
+  trip.run(3600);
+  assert.ok(trip.log[trip.log.length - 1].transit);
+  trip.focused = "eDP-1";
+  trip.run(30_000);
+  assert.ok(trip.log.every((r) => r.screen === "eDP-1"));
+  assert.ok(!trip.log[trip.log.length - 1].transit);
+  assert.ok(trip.log[trip.log.length - 1].x >= 0);
+});
+
+test("monitors: the walk is continuous, with no jumps in x apart from the edge hand-over", () => {
+  const trip = new Trip();
+  trip.focused = "DP-2";
+  trip.run(60_000);
+  for (let i = 1; i < trip.log.length; i++) {
+    const jump = Math.abs(trip.log[i].x - trip.log[i - 1].x);
+    if (trip.log[i].screen !== trip.log[i - 1].screen) continue;
+    assert.ok(jump < 20, `jumped ${jump} at ${i}`);
+  }
+});
+
+test("monitors: do not disturb keeps her where she is", () => {
+  const trip = new Trip();
+  trip.dnd = true;
+  trip.focused = "DP-2";
+  trip.run(30_000);
+  assert.ok(trip.log.every((r) => r.screen === "eDP-1" && !r.transit));
+});
+
+test("monitors: a monitor that goes away takes her with it without a walk", () => {
+  const trip = new Trip();
+  trip.focused = "DP-2";
+  trip.run(60_000);
+  assert.equal(trip.screen, "DP-2");
+  const f = Brain.followStep(trip.m, { now: trip.t + 100, focused: "eDP-1", screens: ["eDP-1"],
+    dnd: false, x: trip.x, barLength: BAR, catSize: CAT });
+  assert.equal(f.screen, "eDP-1");
+});
+
+test("monitors: a focused monitor we do not know of is ignored", () => {
+  const trip = new Trip();
+  trip.focused = "HDMI-A-1";
+  trip.run(10_000);
+  assert.ok(trip.log.every((r) => r.screen === "eDP-1" && !r.transit));
 });
 
 // -------------------------------------------------------------- battery
