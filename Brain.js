@@ -1,426 +1,524 @@
-// The cat's behaviour core.
+// Valkiria's behaviour core.
 //
-// This file is deliberately pure: it holds no QML, touches nothing outside its
-// arguments, and reads no clock of its own. `decide()` takes a snapshot of the
-// world plus the cat's own carried-over state and returns what the cat should
-// be doing. Everything that makes the cat feel alive is decided here, so it can
-// all be tested with a fake clock — see test/brain.test.mjs.
+// Pure: no QML, no clock of its own, nothing outside its arguments. `decide()`
+// takes a snapshot of the world plus her carried-over state and says what she
+// does next. test/brain.test.mjs drives it with a fake clock.
 //
-// The idle behaviour is transcribed from oneko's own state machine
-// (oneko.c:1107): a cat left alone sits, washes its face, scratches its head,
-// yawns, and only then sleeps; any reason to move first plays a wake frame.
-// Keeping that sequence is what makes this read as *the* cat rather than a
-// sprite sliding around.
+// The one rule everything else hangs on: she SETTLES only inside her yard.
+// Every stationary step of every script is checked against the yard span each
+// tick; if she is somewhere she must not be, the script is dropped and she
+// walks home. The only things she does outside the yard are moving (walks,
+// zoomies) and brief "beats" (a bark, a shake) that are never reported as
+// settled.
+//
+// Coordinates are logical px along the bar (x for a horizontal bar, y for a
+// vertical one); `catSize` is her length along the bar.
 
-// How long a petted cat stays pleased.
-var PET_MS = 4000
-// A petted cat looks up first and only then starts grooming. Without this beat
-// it begins washing on the same frame as the click, which reads as the cat
-// ignoring you rather than responding to you.
-var PET_PERK_MS = 450
-// The pause between opening its eyes and actually setting off.
-var AWAKE_MS = 500
-// How long a workspace switch keeps startling the cat.
-var SCAMPER_MS = 1200
-// How far a startled cat bolts.
-var SCAMPER_DISTANCE = 160
-// Close enough to count as arrived.
+var WALK_PX_S = 55
+var RUN_PX_S = 150
 var ARRIVE_EPS = 2
-// How long the cat keeps looking after the last toast has gone. Its attention
-// otherwise lasts exactly as long as the toast is on screen, because toasts do
-// not all last the same time — a critical one stays until dismissed, and a cat
-// that looked away on a five-second timer would be staring at nothing, or turn
-// back before it had even arrived. The bar is wide enough that crossing it
-// takes longer than a short toast lives.
-var NOTIFY_MS = 5000
 
-// The settling sequence, in order. `Infinity` terminates it.
-var CHAIN = [
-  { pose: "stop", ms: 1200 },
-  { pose: "wash", ms: 3000 },
-  { pose: "scratch", ms: 1600 },
-  { pose: "yawn", ms: 1800 },
-  { pose: "sleep", ms: Infinity },
-]
+var BARK_MS = 1500
+var SHAKE_MS = 1500
+var PEEK_MS = 1500
+var GLANCE_MS = 1500
+var BURROW_MS = 1800
+var WRIGGLE_MS = 1200
+var STRETCH_MS = 2000
+var CLICK_WAG_MS = 2500
+var CLICK_HOVER_MS = 2000
+// Chance that a workspace switch also sends her on a walk.
+var WORKSPACE_WALK_P = 0.35
+// A meal lasts this long from its time.
+var MEAL_MS = 30 * 60000
+// Morning walkies are still on offer this long after their time.
+var WALKIES_WINDOW_MIN = 180
 
-// Poses the cat can be roused from. `awake` is excluded: it is the rousing
-// itself, and treating it as rest would restart the wake pause every tick.
-var RESTING = { stop: 1, wash: 1, scratch: 1, yawn: 1, sleep: 1 }
+var DEFAULTS = {
+  sleep: "23:00-09:00",
+  walkies: "09:15",
+  meals: ["10:00", "20:00"],
+  siesta: "15:00-17:00",
+  tripsPerHour: 4,
+  lowBattery: 20,
+  // Away at least this long (seconds) and coming back earns a greeting.
+  greetAfter: 60,
+  // Seconds of absence before she burrows, normally and during the siesta.
+  idleBurrowAfter: 120,
+  siestaBurrowAfter: 10,
+}
 
 function freshState(seed) {
   return {
     seed: seed === undefined ? 987654321 : seed,
-    pose: null,
-    wokeAt: null,
-    restKey: null,
-    restStartedAt: null,
-    wanderTarget: null,
-    // Sleep is not a dead end: a sleeping cat schedules its own next stir, gets
-    // up, potters about, and settles again.
-    nextStirAt: null,
-    stirUntil: null,
-    lastDir: 1,
+    act: null,
+    beat: null,
+    glance: null,
+    tripWanted: null,
+    nextTripAt: null,
+    lastWalkiesDay: null,
+    lastNow: null,
+    lastPose: null,
+    facing: 1,
+    settled: false,
+    seen: { greet: -1, notify: -1, theme: -1, workspace: -1, click: -1 },
   }
 }
 
-// A small LCG, so the cat's wandering is deterministic for a given seed. Using
-// Math.random() here would make the wander tests unreproducible.
+// A small LCG so a given seed always lives the same day.
 function nextRandom(state) {
   state.seed = (state.seed * 1103515245 + 12345) % 2147483648
   return state.seed / 2147483648
 }
 
-function clamp(value, low, high) {
-  if (value < low) return low
-  if (value > high) return high
-  return value
+function between(state, low, high) { return low + nextRandom(state) * (high - low) }
+
+function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v) }
+
+// ---------------------------------------------------------------- clock
+
+// "HH:MM" -> minutes since midnight, or null.
+function parseClock(text) {
+  var m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(String(text === undefined ? "" : text))
+  if (!m) return null
+  var h = Number(m[1]), mm = Number(m[2])
+  if (h > 24 || mm > 59) return null
+  return (h % 24) * 60 + mm
 }
 
-// Pick somewhere for the cat to go of its own accord, keeping clear of the
-// middle of the bar.
-//
-// Omarchy centres the clock by default (`centerAnchor` in shell.json), so the
-// middle is the one stretch of bar that is reliably occupied on almost every
-// setup. The cat still walks *through* it — only the places it chooses to stop
-// are steered away, which is the difference between a cat that avoids the
-// clock and a cat that can never cross the bar.
-//
-// This is a guess about layout, not knowledge of it: nothing exposes widget
-// geometry. `avoidCenter` is the fraction of the bar to keep clear, and 0
-// turns the whole idea off for anyone whose clock lives elsewhere.
-function pickSpot(state, maxX, barLength, avoid) {
-  if (maxX <= 0) return 0
-  if (!(avoid > 0)) return nextRandom(state) * maxX
-
-  var middle = maxX / 2
-  var halfGap = (barLength * avoid) / 2
-  var lowEnd = middle - halfGap
-  var highStart = middle + halfGap
-
-  var lowSpan = Math.max(0, lowEnd)
-  var highSpan = Math.max(0, maxX - highStart)
-  // A bar too narrow to have an outside falls back to anywhere at all, rather
-  // than leaving the cat with nowhere legal to stand.
-  if (lowSpan + highSpan <= 0) return nextRandom(state) * maxX
-
-  var roll = nextRandom(state) * (lowSpan + highSpan)
-  return roll < lowSpan ? roll : highStart + (roll - lowSpan)
+// "23:00-09:00" -> { from, to } in minutes; may wrap midnight.
+function parseRange(text) {
+  var parts = String(text === undefined ? "" : text).split("-")
+  if (parts.length !== 2) return null
+  var from = parseClock(parts[0]), to = parseClock(parts[1])
+  if (from === null || to === null) return null
+  return { from: from, to: to }
 }
 
-// Cats are crepuscular: quiet overnight, busiest around dawn and dusk. This
-// returns multipliers rather than behaviour, so the rhythm colours what the cat
-// already does instead of adding a parallel set of moods.
-//
-// An unreadable hour is treated as an ordinary day, which is what keeps every
-// test written before the rhythm existed behaving exactly as it did.
-function rhythmFor(hour) {
-  var h = Number(hour)
-  if (!isFinite(h)) return { phase: "day", sleepAfterScale: 1, stirEveryScale: 1, brisk: false }
-  h = ((Math.floor(h) % 24) + 24) % 24
-  if (h >= 23 || h < 6) return { phase: "night", sleepAfterScale: 0.3, stirEveryScale: 3, brisk: false }
-  if (h < 9) return { phase: "dawn", sleepAfterScale: 1.5, stirEveryScale: 0.5, brisk: true }
-  if (h < 17) return { phase: "day", sleepAfterScale: 1, stirEveryScale: 1, brisk: false }
-  if (h < 20) return { phase: "dusk", sleepAfterScale: 1.5, stirEveryScale: 0.5, brisk: true }
-  return { phase: "evening", sleepAfterScale: 0.6, stirEveryScale: 1.5, brisk: false }
+function inRange(minutes, range) {
+  if (!range || range.from === range.to) return false
+  return range.from < range.to
+    ? minutes >= range.from && minutes < range.to
+    : minutes >= range.from || minutes < range.to
 }
 
-function rhythmOf(input) {
-  if ((input.config || {}).rhythm === false) {
-    return { phase: "day", sleepAfterScale: 1, stirEveryScale: 1, brisk: false }
-  }
-  return rhythmFor(input.hour)
+function setting(config, key) {
+  return config && config[key] !== undefined ? config[key] : DEFAULTS[key]
 }
 
-function chainPose(elapsed) {
-  var acc = 0
-  for (var i = 0; i < CHAIN.length; i++) {
-    if (!isFinite(CHAIN[i].ms)) return CHAIN[i].pose
-    acc += CHAIN[i].ms
-    if (elapsed < acc) return CHAIN[i].pose
-  }
-  return CHAIN[CHAIN.length - 1].pose
-}
+// ------------------------------------------------------------------ yard
 
-// Total time to walk the chain down to, but not including, sleep.
-function chainWakingTotal() {
-  var acc = 0
-  for (var i = 0; i < CHAIN.length; i++) {
-    if (!isFinite(CHAIN[i].ms)) break
-    acc += CHAIN[i].ms
-  }
-  return acc
-}
-
-// Which rung of the ladder applies. Returns the cat's intent, before any
-// clamping to the bar or any decision about what it should look like.
-//
-//   rest: "hold"  stay exactly here
-//         "wait"  sit here, stay awake
-//         "chain" run the settling sequence, sleeping at the end if `sleepy`
-function intent(input, state) {
+// The stretch of bar she may settle on: the yard widget's slot, less her own
+// length. With no yard placed, a default slot a bit right of the middle.
+function yardSpan(input) {
   var config = input.config || {}
+  var cat = input.catSize
+  var maxX = Math.max(0, input.barLength - cat)
+  var yard = input.yard
+  if (!yard) {
+    var w = Number(config.yardWidth) > 0 ? Number(config.yardWidth) : cat * 3
+    yard = { x: input.barLength * 0.62 - w / 2, w: w }
+  }
+  var lo = clamp(yard.x, 0, maxX)
+  var hi = clamp(yard.x + yard.w - cat, lo, maxX)
+  return { lo: lo, hi: hi }
+}
+
+function inSpan(x, span) { return x >= span.lo - ARRIVE_EPS && x <= span.hi + ARRIVE_EPS }
+
+// Where a step's target points: a fraction of the yard span (so it follows a
+// yard that moves) or an absolute position.
+function resolve(to, ctx) {
+  if (typeof to === "object") return ctx.span.lo + to.f * (ctx.span.hi - ctx.span.lo)
+  return clamp(to, 0, ctx.maxX)
+}
+
+// --------------------------------------------------------------- scripts
+//
+// A script is a list of steps run in order. A step with `to` moves her there
+// (and ends on arrival); a step with `ms` holds the pose for that long
+// (Infinity holds until the script is replaced). `beat` steps may happen
+// outside the yard.
+
+function go(pose, to, gait) { return { pose: pose, to: to, gait: gait || "walk" } }
+function hold(pose, ms) { return { pose: pose, ms: ms } }
+
+function script(kind, steps, extra) {
+  var act = { kind: kind, reason: kind, want: "free", steps: steps, i: 0, stepAt: null, harness: false }
+  if (extra) for (var k in extra) act[k] = extra[k]
+  return act
+}
+
+function homeScript(state) {
+  return script("return", [go("walk", { f: nextRandom(state) })])
+}
+
+function napScript(reason) {
+  return script("nap", [
+    go("walk", { f: 1 }),
+    hold("burrow", BURROW_MS),
+    hold("blanket", Infinity),
+  ], { want: "nap", reason: reason })
+}
+
+// Rising from the blanket, then the play-bow.
+function wakeScript() {
+  return script("wake", [hold("wriggle", WRIGGLE_MS), hold("stretch", STRETCH_MS)],
+    { want: "none" })
+}
+
+function musicScript(state) {
+  var steps = [go("walk", { f: nextRandom(state) }), hold("hover", 1500)]
+  for (var i = 0; i < 3; i++) {
+    steps.push(hold("slump", between(state, 5000, 8000)))
+    steps.push(hold("wag", 2500))
+  }
+  return script("music", steps, { want: "music" })
+}
+
+function greetScript(input, state, ctx) {
+  var steps = []
+  if (state.lastPose === "blanket" || state.lastPose === "burrow") {
+    steps.push(hold("wriggle", WRIGGLE_MS))
+  }
+  var far = input.x < ctx.maxX / 2 ? ctx.maxX : 0
+  steps.push(go("run", far, "run"))
+  steps.push(go("run", ctx.maxX - far, "run"))
+  steps.push(go("run", { f: nextRandom(state) }, "run"))
+  return script("greet", steps, { want: "greet" })
+}
+
+// A walk away from the yard, to somewhere outside it. `dir` prefers a side.
+function tripScript(state, ctx, dir) {
+  var leftRoom = ctx.span.lo - ctx.cat
+  var rightRoom = ctx.maxX - ctx.span.hi - ctx.cat
+  var side = 0
+  if (dir > 0 && rightRoom > 0) side = 1
+  else if (dir < 0 && leftRoom > 0) side = -1
+  else if (leftRoom > 0 && rightRoom > 0) side = nextRandom(state) < 0.5 ? -1 : 1
+  else if (rightRoom > 0) side = 1
+  else if (leftRoom > 0) side = -1
+  if (side === 0) return null
+  var target = side > 0
+    ? ctx.span.hi + ctx.cat + nextRandom(state) * rightRoom
+    : nextRandom(state) * leftRoom
+  return script("trip", [go("walk", target)])
+}
+
+// Morning walkies: the whole bar, nearest end first, then home.
+function walkiesScript(input, ctx) {
+  var first = input.x < ctx.maxX / 2 ? 0 : ctx.maxX
+  return script("walkies", [go("walk", first), go("walk", ctx.maxX - first)],
+    { harness: true })
+}
+
+function yardScript(state, low) {
+  var r = nextRandom(state)
+  var spot = { f: nextRandom(state) }
+  // Low battery: she mostly just hovers about, and what she does is slow.
+  if (low && r < 0.6) return script("yard", [hold("hover", between(state, 4000, 9000))])
+  if (r < 0.2) return script("yard", [go("walk", spot)])
+  if (r < 0.4) return script("yard", [go("sniff", spot)])
+  if (r < 0.52) return script("yard", [hold("dig", between(state, 2500, 4500))])
+  if (r < 0.62) return script("yard", [hold("scratch", between(state, 2000, 3500))])
+  if (r < 0.75) return script("yard", [hold("hover", 1500), hold("slump", between(state, 7000, 14000))])
+  if (r < 0.9) return script("yard", [hold("hover", 1200), hold("sit", between(state, 3000, 6000)),
+    hold("wag", 2500), hold("sit", 2000)])
+  return script("yard", [hold("hover", between(state, 3000, 6000))])
+}
+
+// Waiting hopefully at meal time.
+function mealScript(state) {
+  var steps = [go("walk", { f: nextRandom(state) }), hold("hover", between(state, 5000, 9000)),
+    hold("sit", 4000), hold("wag", 2500)]
+  return script("meal", steps)
+}
+
+// ----------------------------------------------------------------- brain
+
+function context(input, state) {
+  var config = input.config || {}
+  var cat = input.catSize
+  var minutes = Number(input.minutes)
+  var batteryPct = input.batteryPct === undefined ? null : input.batteryPct
   var reactions = config.reactions || {}
-  var maxX = Math.max(0, input.barLength - input.catSize)
-  var now = input.now
-  var rhythm = rhythmOf(input)
-
-  // 1. Just petted.
-  if (input.pettedAt !== null && input.pettedAt !== undefined
-      && now - input.pettedAt < PET_MS) {
-    var sincePet = now - input.pettedAt
-    return {
-      reason: "petted",
-      target: input.x,
-      gait: "idle",
-      rest: "hold",
-      pose: sincePet < PET_PERK_MS ? "awake" : "wash",
-    }
-  }
-
-  // 3. Startled — by something you did, or by the world changing colour.
-  //
-  //    Both are the same movement: a short bolt and then a wait. They share a
-  //    rung rather than getting one each, because two rungs that differ only in
-  //    their reason string is two places to keep in step.
-  if (reactions.workspace !== false && input.workspaceEvent
-      && now - input.workspaceEvent.at < SCAMPER_MS) {
-    return {
-      reason: "workspace",
-      target: input.x + input.workspaceEvent.dir * SCAMPER_DISTANCE,
-      gait: "run",
-      rest: "wait",
-    }
-  }
-  if (reactions.theme !== false && input.themeChangedAt !== null
-      && input.themeChangedAt !== undefined
-      && now - input.themeChangedAt < SCAMPER_MS) {
-    // No direction is implied by a theme change, so pick one.
-    var bolt = nextRandom(state) < 0.5 ? -1 : 1
-    return {
-      reason: "theme",
-      target: input.x + bolt * SCAMPER_DISTANCE,
-      gait: "run",
-      rest: "wait",
-    }
-  }
-
-  // 4. A notification just arrived. Omarchy anchors toasts to the top right, so
-  //    the nearest point on the bar is its right end — or its top, when the bar
-  //    itself is vertical.
-  if (reactions.notification !== false
-      && (input.notifying === true
-          || (input.notifyAt !== null && input.notifyAt !== undefined
-              && now - input.notifyAt < NOTIFY_MS))) {
-    return {
-      reason: "notification",
-      target: input.axis === "v" ? 0 : maxX,
-      gait: "run",
-      rest: "wait",
-    }
-  }
-
-  // A sleeping cat gets up now and then, potters about, and settles again.
-  // This sits above the rungs that can end in sleep rather than inside one of
-  // them, because the cat can nod off for more than one reason — on AC power as
-  // well as from plain idleness — and it should rouse itself from any of them.
-  // It can only fire when a stir is actually booked, and a stir is only ever
-  // booked by falling asleep.
-  if (state.stirUntil !== null && state.stirUntil !== undefined) {
-    if (now < state.stirUntil) {
-      if (state.wanderTarget === null || state.wanderTarget === undefined) {
-        state.wanderTarget = pickSpot(state, maxX, input.barLength, config.avoidCenter)
-      }
-      return {
-        reason: "stir",
-        target: state.wanderTarget,
-        gait: rhythm.brisk ? "run" : "walk",
-        rest: "chain",
-      }
-    }
-    state.stirUntil = null
-    state.wanderTarget = null
-  }
-  if (state.nextStirAt !== null && state.nextStirAt !== undefined
-      && now >= state.nextStirAt) {
-    state.nextStirAt = null
-    state.stirUntil = now + (config.stirFor || 25) * 1000
-    state.wanderTarget = pickSpot(state, maxX, input.barLength, config.avoidCenter)
-    return {
-      reason: "stir",
-      target: state.wanderTarget,
-      gait: rhythm.brisk ? "run" : "walk",
-      rest: "chain",
-    }
-  }
-
-  // 5. Something is playing — dance, wherever the cat happens to be.
-  //
-  //    This sits above the charging rung, and the ordering matters more than it
-  //    looks. Charging is a *sleepy* rung: it returns and the cat nods off. Put
-  //    it first and it silences every waking reaction below it, which on a
-  //    laptop that lives on mains power is all of the time — the music reaction
-  //    became literally unreachable. Waking behaviour beats sleeping behaviour.
-  if (reactions.music !== false && input.music) {
-    return {
-      reason: "music",
-      target: input.x,
-      gait: "idle",
-      rest: "wait",
-      bob: true,
-    }
-  }
-
-  // 6. On AC power — get drowsy, and sleep wherever it happens to be.
-  //
-  //    This used to march the cat to the right third of the bar, on the theory
-  //    that it was napping by the power widget. In practice it meant the cat
-  //    always slept in the same spot, and worse, that a cat which had stirred
-  //    and wandered off would trudge all the way back before settling. Cats
-  //    sleep where they are.
-  if (reactions.charging !== false && input.charging) {
-    return {
-      reason: "charging",
-      target: input.x,
-      gait: "idle",
-      rest: "chain",
-      sleepy: true,
-    }
-  }
-
-  // 7. The user has been away (no keyboard or pointer activity) a long while.
-  //    `lastActivityAt` comes from the body's idle monitor.
-  if (now - input.lastActivityAt
-      > (config.sleepAfter || 180) * 1000 * rhythm.sleepAfterScale) {
-    return {
-      reason: "idle-sleep",
-      target: input.x,
-      gait: "idle",
-      rest: "chain",
-      sleepy: true,
-    }
-  }
-
-  // 8. Nothing in particular. Wander, and re-roll once the cat has finished
-  //    dawdling wherever it arrived.
-  if (state.wanderTarget === null || state.wanderTarget === undefined) {
-    state.wanderTarget = pickSpot(state, maxX, input.barLength, config.avoidCenter)
-  }
+  var dnd = input.dnd === true
+  var react = function (name) { return !dnd && reactions[name] !== false }
+  var low = batteryPct !== null && batteryPct < Number(setting(config, "lowBattery"))
+    && input.charging !== true
   return {
-    reason: "wander",
-    target: state.wanderTarget,
-    gait: rhythm.brisk ? "run" : "walk",
-    rest: "chain",
+    cat: cat,
+    maxX: Math.max(0, input.barLength - cat),
+    span: yardSpan(input),
+    minutes: isFinite(minutes) ? minutes : 720,
+    low: low,
+    dnd: dnd,
+    react: react,
+    sleepRange: parseRange(setting(config, "sleep")),
+    siestaRange: parseRange(setting(config, "siesta")),
   }
+}
+
+function inMeal(input, ctx) {
+  var meals = setting(input.config, "meals")
+  if (!Array.isArray(meals)) return false
+  for (var i = 0; i < meals.length; i++) {
+    var at = parseClock(meals[i])
+    if (at === null) continue
+    var since = ((ctx.minutes - at) % 1440 + 1440) % 1440
+    if (since * 60000 < MEAL_MS) return true
+  }
+  return false
+}
+
+function walkiesDue(input, state, ctx) {
+  var at = parseClock(setting(input.config, "walkies"))
+  if (at === null || state.lastWalkiesDay === input.day) return false
+  var since = ctx.minutes - at
+  return since >= 0 && since < WALKIES_WINDOW_MIN && !inRange(ctx.minutes, ctx.sleepRange)
+}
+
+// What she is standing by to do, by the priority order: music > charging >
+// idle, then the day's rhythm (siesta, night). Greet and notification are
+// events and are handled before this.
+function standing(input, ctx) {
+  var idleFor = Number(input.idleFor) || 0
+  var config = input.config || {}
+  if (ctx.react("music") && input.music === true) return { want: "music" }
+  if (ctx.react("charging") && input.charging === true) return { want: "nap", reason: "charging" }
+  if (ctx.react("idle") && idleFor >= Number(setting(config, "idleBurrowAfter")) * 1000) {
+    return { want: "nap", reason: "idle" }
+  }
+  if (inRange(ctx.minutes, ctx.siestaRange)
+      && idleFor >= Number(setting(config, "siestaBurrowAfter")) * 1000) {
+    return { want: "nap", reason: "siesta" }
+  }
+  if (inRange(ctx.minutes, ctx.sleepRange)) return { want: "nap", reason: "night" }
+  return { want: "free" }
+}
+
+function underBlanket(act) {
+  return !!act && act.kind === "nap" && act.i >= 1
+}
+
+function takeEvents(input, state, ctx) {
+  var seen = state.seen
+  var now = input.now
+
+  var g = input.greet
+  if (g && g.at > seen.greet) {
+    seen.greet = g.at
+    var away = Number(g.awayMs)
+    if (ctx.react("greet") && (!isFinite(away) || away >= Number(setting(input.config, "greetAfter")) * 1000)) {
+      state.act = greetScript(input, state, ctx)
+      state.beat = null
+    }
+  }
+
+  var busyGreeting = state.act && state.act.kind === "greet"
+
+  if (input.notifyAt !== null && input.notifyAt !== undefined && input.notifyAt > seen.notify) {
+    seen.notify = input.notifyAt
+    var nightAsleep = state.act && state.act.kind === "nap" && state.act.reason === "night"
+    if (ctx.react("notification") && !busyGreeting && !nightAsleep) {
+      state.beat = { steps: [{ pose: "bark", ms: BARK_MS }], t0: now, settled: false,
+        // Notifications come in at the top right of the screen.
+        face: input.axis === "v" ? -1 : 1 }
+    }
+  }
+
+  if (input.themeChangedAt !== null && input.themeChangedAt !== undefined
+      && input.themeChangedAt > seen.theme) {
+    seen.theme = input.themeChangedAt
+    if (ctx.react("theme") && !busyGreeting && !state.beat && !underBlanket(state.act)) {
+      state.beat = { steps: [{ pose: "bark", ms: 500 }, { pose: "scratch", ms: SHAKE_MS }],
+        t0: now, settled: false }
+    }
+  }
+
+  var w = input.workspaceEvent
+  if (w && w.at > seen.workspace) {
+    seen.workspace = w.at
+    if (ctx.react("workspace") && !busyGreeting) {
+      state.glance = { until: now + GLANCE_MS, dir: w.dir < 0 ? -1 : 1 }
+      if (nextRandom(state) < WORKSPACE_WALK_P) state.tripWanted = state.glance.dir
+    }
+  }
+
+  if (input.clickedAt !== null && input.clickedAt !== undefined && input.clickedAt > seen.click) {
+    seen.click = input.clickedAt
+    if (state.settled && !state.beat) {
+      if (underBlanket(state.act)) {
+        // A sleepy peek, then back under.
+        state.beat = { steps: [{ pose: "wriggle", ms: PEEK_MS }], t0: now, settled: true }
+      } else if (state.act && state.act.kind !== "greet" && state.act.kind !== "wake") {
+        state.act = script("click", [hold("wag", CLICK_WAG_MS), hold("hover", CLICK_HOVER_MS)],
+          { want: "any" })
+      }
+    }
+  }
+}
+
+// Replace the running script when what she is standing by to do has changed.
+function reconcile(state, standingNow) {
+  var act = state.act
+  if (!act) return
+  if (act.want === "any" || act.want === "greet" || act.want === "none") return
+  var want = standingNow.want
+  if (act.want === want) {
+    if (want === "nap") act.reason = standingNow.reason
+    return
+  }
+  state.act = underBlanket(act) ? wakeScript() : null
+}
+
+function select(input, state, ctx, standingNow) {
+  if (standingNow.want === "music") return musicScript(state)
+  if (standingNow.want === "nap") return napScript(standingNow.reason)
+  if (!inSpan(input.x, ctx.span)) return homeScript(state)
+
+  var now = input.now
+  var canWalk = !ctx.low
+  var meal = inMeal(input, ctx)
+
+  if (canWalk && walkiesDue(input, state, ctx)) {
+    state.lastWalkiesDay = input.day
+    return walkiesScript(input, ctx)
+  }
+  if (canWalk && state.tripWanted !== null) {
+    var dir = state.tripWanted
+    state.tripWanted = null
+    var wanted = tripScript(state, ctx, dir)
+    if (wanted) return wanted
+  }
+  if (canWalk && !meal) {
+    var mean = 3600000 / Math.max(0.1, Number(setting(input.config, "tripsPerHour")))
+    if (state.nextTripAt === null) state.nextTripAt = now + mean * between(state, 0.5, 1.5)
+    if (now >= state.nextTripAt) {
+      state.nextTripAt = now + mean * between(state, 0.5, 1.5)
+      var trip = tripScript(state, ctx, 0)
+      if (trip) return trip
+    }
+  }
+  if (meal) return mealScript(state)
+  return yardScript(state, ctx.low)
+}
+
+// Run the current script as far as it will go this tick. Returns what she is
+// doing, or null when the script has finished or been abandoned.
+function advance(input, state, ctx) {
+  var act = state.act
+  for (var guard = 0; act && guard < 12; guard++) {
+    var step = act.steps[act.i]
+    if (!step) { state.act = null; return null }
+    if (act.stepAt === null) act.stepAt = input.now
+    if (step.to !== undefined) {
+      var target = resolve(step.to, ctx)
+      if (Math.abs(target - input.x) <= ARRIVE_EPS) {
+        act.i++
+        act.stepAt = input.now
+        continue
+      }
+      return { step: step, moving: true, target: target }
+    }
+    // Stationary. Never settle anywhere but the yard.
+    if (!inSpan(input.x, ctx.span)) { state.act = null; return null }
+    if (input.now - act.stepAt >= step.ms) {
+      act.i++
+      act.stepAt = input.now
+      continue
+    }
+    return { step: step, moving: false, target: input.x }
+  }
+  state.act = null
+  return null
+}
+
+function beatStep(beat, now) {
+  var elapsed = now - beat.t0
+  for (var i = 0; i < beat.steps.length; i++) {
+    if (elapsed < beat.steps[i].ms) return beat.steps[i]
+    elapsed -= beat.steps[i].ms
+  }
+  return null
 }
 
 function decide(input, state) {
   state = state || freshState()
-  var maxX = Math.max(0, input.barLength - input.catSize)
-  var vertical = input.axis === "v"
   var now = input.now
+  var ctx = context(input, state)
+  var dt = state.lastNow === null ? 0 : Math.max(0, now - state.lastNow)
+  state.lastNow = now
+  var speedScale = ctx.low ? 0.5 : 1
 
-  var want = intent(input, state)
-  var rawTarget = want.target
-  var target = clamp(rawTarget, 0, maxX)
-  var delta = target - input.x
-  var moving = want.gait !== "idle" && Math.abs(delta) > ARRIVE_EPS
+  takeEvents(input, state, ctx)
 
-  var config = input.config || {}
-
-  // A stir schedule belongs to the states that can end in sleep. If the cat is
-  // up for a real reason — petted, startled — drop it, so it does not
-  // fire the moment the cat next settles.
-  if (!want.sleepy && want.reason !== "stir") {
-    state.nextStirAt = null
-    state.stirUntil = null
-  }
-
-  // Rouse the cat before it moves, the way oneko does.
-  if (moving && RESTING[state.pose] && (state.wokeAt === null || state.wokeAt === undefined)) {
-    state.wokeAt = now
-  }
-  if (state.wokeAt !== null && state.wokeAt !== undefined) {
-    if (!moving) {
-      state.wokeAt = null
-    } else if (now - state.wokeAt < AWAKE_MS) {
-      state.pose = "awake"
-      return {
-        reason: want.reason, target: target, gait: "idle", pose: "awake",
-        bob: false, pettable: false, idle: false,
-        wakeIn: 0, state: state,
-      }
-    } else {
-      state.wokeAt = null
+  // A beat (bark, shake, peek) pauses whatever she was doing: the script's
+  // clock is held until it is over.
+  if (state.beat) {
+    var bs = beatStep(state.beat, now)
+    if (bs) {
+      if (state.act && state.act.stepAt !== null) state.act.stepAt += dt
+      var f = state.beat.face !== undefined ? state.beat.face : state.facing
+      state.facing = f
+      state.lastPose = bs.pose
+      state.settled = state.beat.settled
+      return output(state, ctx, "beat", false, input.x, "idle", bs.pose, f, state.beat.settled, speedScale, 100)
     }
+    state.beat = null
   }
 
-  if (moving) {
-    state.restKey = null
-    state.restStartedAt = null
-    state.lastDir = delta > 0 ? 1 : -1
-    state.pose = vertical
-      ? (delta > 0 ? "down" : "up")
-      : (delta > 0 ? "right" : "left")
-    return {
-      reason: want.reason, target: target, gait: want.gait, pose: state.pose,
-      bob: false, pettable: false, idle: false,
-      wakeIn: 0, state: state,
-    }
+  var standingNow = standing(input, ctx)
+  reconcile(state, standingNow)
+  if (state.tripWanted !== null && state.act && state.act.kind === "yard") state.act = null
+  if (ctx.low || state.act && (state.act.kind === "nap" || state.act.kind === "music")) {
+    state.tripWanted = null
   }
 
-  // Settled. Start (or continue) whatever the cat does while standing still.
-  var restKey = want.reason + ":" + Math.round(target)
-  if (state.restKey !== restKey) {
-    state.restKey = restKey
-    state.restStartedAt = now
+  var r = null
+  for (var attempt = 0; attempt < 3 && !r; attempt++) {
+    if (!state.act) state.act = select(input, state, ctx, standingNow)
+    r = advance(input, state, ctx)
   }
-  var elapsed = now - state.restStartedAt
-
-  var pose
-  if (want.rest === "hold") {
-    pose = want.pose || "stop"
-  } else if (want.rest === "wait") {
-    pose = "stop"
-  } else {
-    pose = chainPose(elapsed)
-    if (!want.sleepy && pose === "sleep") {
-      // A cat that is merely idle, not tired, gets bored and moves on rather
-      // than dropping off — sleep is rung 6's job.
-      state.wanderTarget = null
-      state.restKey = null
-      state.restStartedAt = null
-      pose = "stop"
-    }
+  if (!r) {
+    // Nothing runnable (should not happen): stand and hover where she is.
+    state.act = homeScript(state)
+    r = { step: go("walk", { f: 0.5 }), moving: true, target: clamp(input.x, ctx.span.lo, ctx.span.hi) }
   }
 
-  // Wanting to walk off the end of the bar becomes clawing at it instead.
-  if (rawTarget > maxX + ARRIVE_EPS) {
-    pose = vertical ? "dtogi" : "rtogi"
-  } else if (rawTarget < -ARRIVE_EPS) {
-    pose = vertical ? "utogi" : "ltogi"
+  var act = state.act
+  var facing = state.facing
+  var pose = r.step.pose
+  var gait = "idle"
+  if (r.moving) {
+    gait = r.step.gait
+    var delta = r.target - input.x
+    if (delta > ARRIVE_EPS) facing = 1
+    else if (delta < -ARRIVE_EPS) facing = -1
+  } else if (state.glance && now < state.glance.until) {
+    facing = state.glance.dir
   }
+  state.facing = facing
+  state.lastPose = pose
+  state.settled = !r.moving
+  // Sleeping needs no frames; check back in a second for the clock.
+  var wakeIn = pose === "blanket" ? 1000 : 0
+  return output(state, ctx, act.reason, act.harness, r.target, gait, pose, facing, !r.moving, speedScale, wakeIn)
+}
 
-  state.pose = pose
-
-  // A cat that has just dropped off books its own next stir. Without this it
-  // would sleep until the user came back, which on an unattended machine means
-  // forever.
-  if (pose === "sleep"
-      && (state.nextStirAt === null || state.nextStirAt === undefined)) {
-    var average = (config.stirEvery || 150) * 1000 * rhythmOf(input).stirEveryScale
-    state.nextStirAt = now + average * (0.6 + 0.8 * nextRandom(state))
-  }
-
+function output(state, ctx, reason, harness, target, gait, pose, facing, settled, speedScale, wakeIn) {
   return {
-    reason: want.reason,
+    reason: reason,
     target: target,
-    gait: "idle",
+    gait: gait,
     pose: pose,
-    bob: want.bob === true,
-    pettable: config.pettable !== false,
-    idle: pose === "sleep",
-    // How long the body may stop ticking for. Only meaningful while asleep.
-    wakeIn: pose === "sleep" ? Math.max(0, state.nextStirAt - now) : 0,
+    facing: facing,
+    settled: settled,
+    // Click and menu are for a settled Valkiria only.
+    pettable: settled,
+    harness: harness === true,
+    speedScale: speedScale,
+    wakeIn: wakeIn,
     state: state,
   }
 }

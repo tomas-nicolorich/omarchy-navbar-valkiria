@@ -67,19 +67,19 @@ Item {
 
   readonly property real speed: Number(config.speed) > 0 ? Number(config.speed) : 1.0
   readonly property bool pettable: config.pettable !== false
-  readonly property int sleepAfter: Number(config.sleepAfter) > 0 ? Number(config.sleepAfter) : 180
   readonly property var reactions: config.reactions && typeof config.reactions === "object"
     ? config.reactions : ({})
-  readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 25
+  // Do not disturb (the menu in ticket 005 writes it).
+  readonly property bool dnd: config.dnd === true
+  // Her length along the bar, in logical px: the art is 40x25 art px drawn at
+  // 32x20 logical px (1 art px = 0.8 logical px, 1:1 device px at scale 1.25).
+  readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 32
+  readonly property int catHeight: Math.round(catSize * 25 / 40)
 
-  // Fraction of the bar to keep clear when the cat picks its own spot. Omarchy
-  // centres the clock, so the middle is the one place reliably occupied.
-  readonly property real avoidCenter: config.avoidCenter !== undefined
-    ? Math.max(0, Math.min(0.9, Number(config.avoidCenter)))
-    : 0.2
-  readonly property bool rhythm: config.rhythm !== false
-  readonly property int stirEvery: Number(config.stirEvery) > 0 ? Number(config.stirEvery) : 150
-  readonly property int stirFor: Number(config.stirFor) > 0 ? Number(config.stirFor) : 25
+  // Brain config: sleep, walkies, meals, siesta, yardWidth, tripsPerHour,
+  // greetAfter, idleBurrowAfter, siestaBurrowAfter, lowBattery, reactions.
+  // Absent keys fall back to the brain's own defaults.
+  readonly property var brainConfig: config
 
   // ------------------------------------------------------------ bar state
 
@@ -113,48 +113,64 @@ Item {
 
   // --------------------------------------------------------- world inputs
 
-  // The user counts as away after this long without input. The brain applies
-  // its own (longer) sleep delay on top.
+  // The user counts as away after this long without input; the brain applies
+  // its own, longer, delays on top.
   readonly property int awayAfterSec: 15
-  property real lastActivityAt: 0
+  // When the current absence began (backdated by the idle timeout), or 0.
+  property real awaySince: 0
+  property var greet: null
 
+  // There is no shell signal for "screen unlocked" or "idle ended". The lock
+  // screen is an ext-session-lock surface that takes input, so touching the
+  // keyboard to unlock ends the idle period too: idle-end after a long enough
+  // absence is the greeting, and covers unlock.
   IdleMonitor {
     id: idleMonitor
     timeout: root.awayAfterSec
     respectInhibitors: false
     onIsIdleChanged: {
-      // Backdate the start of the absence; on return, the clock restarts.
-      root.lastActivityAt = Date.now() - (isIdle ? root.awayAfterSec * 1000 : 0)
-      if (!isIdle) root.nudge()
+      if (isIdle) {
+        root.awaySince = Date.now() - root.awayAfterSec * 1000
+      } else {
+        var away = root.awaySince > 0 ? Date.now() - root.awaySince : 0
+        root.awaySince = 0
+        root.greet = { at: Date.now(), awayMs: away }
+      }
+      root.nudge()
     }
   }
 
-  property real pettedAt: -1
+  property real clickedAt: -1
   property var workspaceEvent: null
   property real notifyAt: -1
   property real themeChangedAt: -1
 
-  // The shell owns the notification server, so a plugin cannot run a second
-  // one — but it does not need to. `serviceFor` hands out the running service
-  // (shell.qml:275) and its popup list is deliberately aliased for exactly
-  // this: "consumers outside this Item's id scope can bind to it".
-  readonly property var notifications: shell && shell.serviceFor
-    ? shell.serviceFor("omarchy.notifications") : null
-  readonly property var popupModel: notifications && notifications.popupModel
-    ? notifications.popupModel : null
-  property int _popupCount: 0
-
-  Connections {
-    target: root.popupModel
-    function onCountChanged() {
-      var n = root.popupModel ? root.popupModel.count : 0
-      // Only an arrival is interesting; a toast expiring is not news.
-      if (n > root._popupCount && root.reactions.notification !== false) {
+  // Notification arrivals. The shell hands third-party plugins no way to see
+  // them: `serviceFor` is null for them, the first-party proxy is only given to
+  // plugins of kind "bar", and that proxy exposes nothing but doNotDisturb. A
+  // second NotificationServer is impossible (the shell owns the bus name). So
+  // watch the session bus instead: every notification is a Notify method call
+  // on org.freedesktop.Notifications, and dbus-monitor can see those without
+  // owning the name. Verified: one `notify-send` produces one Notify call.
+  Process {
+    id: notifyWatch
+    command: ["dbus-monitor", "--session",
+      "type='method_call',interface='org.freedesktop.Notifications',member='Notify'"]
+    running: root.reactions.notification !== false
+    stdout: SplitParser {
+      onRead: function (line) {
+        if (line.indexOf("member=Notify") === -1) return
         root.notifyAt = Date.now()
         root.nudge()
       }
-      root._popupCount = n
     }
+  }
+
+  // Battery percentage for the "low battery" mood; null with no battery.
+  readonly property var batteryPct: {
+    var device = UPower.displayDevice
+    if (!device || !device.isPresent) return null
+    return Math.round(Number(device.percentage) * (Number(device.percentage) <= 1 ? 100 : 1))
   }
 
   // A theme switch repaints the cat mid-stride, which is a good excuse to have
@@ -189,20 +205,25 @@ Item {
 
   // ------------------------------------------------------------ cat state
 
+  // Her extent along the bar (the sprite is not rotated on a vertical bar).
+  readonly property int alongSize: vertical ? catHeight : catSize
+
   readonly property real barLength: catScreen
     ? (vertical ? catScreen.height : catScreen.width)
     : 0
 
   property real catPos: 0
-  property string catPose: "stop"
-  property bool catBob: false
+  property string catPose: "sit"
+  property int catFacing: 1
   property bool catSettled: false
   property int animTick: 0
-  // Seeded from the clock so the cat does not live the same day twice. The
-  // brain's generator is deterministic by design — that is what makes the
-  // wander tests reproducible — but a fixed seed would mean every session
-  // started in the same spot and wandered the same route.
+  // Seeded from the clock so she does not live the same day twice (the brain's
+  // generator is deterministic, which is what makes its tests reproducible).
   property var brainState: Brain.freshState(Date.now() % 2147483647)
+
+  // Where the yard widget sits on the screen she is on (Yard.qml singleton).
+  readonly property var yardRecord: catScreen ? Yard.xs[String(catScreen.name)] : undefined
+  readonly property var yardForBrain: yardRecord ? { x: yardRecord.x, w: yardRecord.w } : null
 
   readonly property bool maskActive: catSettled && root.pettable && !root.barHidden
 
@@ -237,11 +258,14 @@ Item {
   function nudge() {
     // Something happened that the cat might care about — make sure the loop is
     // running to notice it.
+    ticker.interval = tickMs
     if (!ticker.running && !barHidden) ticker.running = true
   }
 
   Timer {
     id: ticker
+    // The brain asks (wakeIn) for a slower tick while she lies under the
+    // blanket; the clock still has to be checked for waking time.
     interval: root.tickMs
     repeat: true
     running: false
@@ -250,8 +274,8 @@ Item {
 
   Timer {
     id: animator
-    // oneko alternates its two frames far slower than the movement updates;
-    // matching that keeps the walk cycle looking hand-drawn rather than frantic.
+    // Frames advance far slower than the movement updates; this keeps the
+    // walk cycle looking drawn rather than frantic.
     interval: 150
     repeat: true
     running: ticker.running
@@ -264,43 +288,37 @@ Item {
     if (!catScreen || barLength <= 0) return
 
     var now = Date.now()
-    var maxPos = Math.max(0, barLength - catSize)
+    var date = new Date(now)
+    var maxPos = Math.max(0, barLength - alongSize)
 
-    // Drop the cat somewhere arbitrary the first time we know how long the bar
-    // is. Starting at zero every session meant that on a machine left plugged
-    // in — where the cat settles straight away — it always dozed off in the
-    // same left-hand corner.
+    // She starts the session at home in the yard.
     if (!_placed) {
       _placed = true
-      catPos = Brain.pickSpot(brainState, maxPos, barLength, avoidCenter)
+      var span = Brain.yardSpan({ barLength: barLength, catSize: alongSize,
+        yard: yardForBrain, config: brainConfig })
+      catPos = span.lo
     }
 
     var decision = Brain.decide({
       now: now,
       axis: vertical ? "v" : "h",
-      edge: barPosition,
       barLength: barLength,
-      catSize: catSize,
+      catSize: alongSize,
       x: catPos,
-      pettedAt: pettedAt >= 0 ? pettedAt : null,
-      lastActivityAt: idleMonitor.isIdle ? lastActivityAt : now,
+      yard: yardForBrain,
+      minutes: date.getHours() * 60 + date.getMinutes(),
+      day: date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate(),
+      idleFor: idleMonitor.isIdle && awaySince > 0 ? now - awaySince : 0,
       music: musicPlaying,
       charging: charging,
-      workspaceEvent: workspaceEvent,
+      batteryPct: batteryPct,
+      dnd: dnd,
+      greet: greet,
       notifyAt: notifyAt >= 0 ? notifyAt : null,
-      notifying: reactions.notification !== false && popupModel !== null
-        && popupModel.count > 0,
       themeChangedAt: themeChangedAt >= 0 ? themeChangedAt : null,
-      hour: new Date().getHours(),
-      config: {
-        pettable: pettable,
-        sleepAfter: sleepAfter,
-        rhythm: rhythm,
-        avoidCenter: avoidCenter,
-        stirEvery: stirEvery,
-        stirFor: stirFor,
-        reactions: reactions,
-      },
+      workspaceEvent: workspaceEvent,
+      clickedAt: clickedAt >= 0 ? clickedAt : null,
+      config: brainConfig,
     }, brainState)
 
     brainState = decision.state
@@ -308,9 +326,10 @@ Item {
     // Move toward the target at whatever pace the brain asked for. Positions
     // are rounded to whole logical pixels: pixel art on fractional offsets
     // shimmers as it moves.
-    var pixelsPerSecond = decision.gait === "run" ? 150 : (decision.gait === "walk" ? 55 : 0)
+    var pixelsPerSecond = decision.gait === "run" ? Brain.RUN_PX_S
+      : (decision.gait === "walk" ? Brain.WALK_PX_S : 0)
     if (pixelsPerSecond > 0) {
-      var stepSize = pixelsPerSecond * speed * (tickMs / 1000)
+      var stepSize = pixelsPerSecond * decision.speedScale * speed * (tickMs / 1000)
       var delta = decision.target - catPos
       catPos = Math.abs(delta) <= stepSize
         ? decision.target
@@ -319,33 +338,10 @@ Item {
     catPos = Math.max(0, Math.min(maxPos, catPos))
 
     catPose = decision.pose
-    catBob = decision.bob
-    catSettled = decision.gait === "idle"
+    catFacing = decision.facing
+    catSettled = decision.pettable
 
-    // Let a stale scamper expire so it cannot re-fire.
-    if (workspaceEvent && now - workspaceEvent.at > 4000) workspaceEvent = null
-    if (notifyAt >= 0 && now - notifyAt > 20000) notifyAt = -1
-    if (themeChangedAt >= 0 && now - themeChangedAt > 4000) themeChangedAt = -1
-
-    // A sleeping cat needs no frames until something wakes it, and every event
-    // source above calls nudge() to start the loop again.
-    if (decision.idle) {
-      ticker.running = false
-      animTick = 0
-      // The brain books its own next stir while it sleeps, so the body has to
-      // set an alarm. Without it the cat would sleep until you touched the
-      // mouse, which on an unattended machine is never.
-      if (decision.wakeIn > 0) {
-        stirAlarm.interval = Math.max(1000, Math.round(decision.wakeIn))
-        stirAlarm.restart()
-      }
-    }
-  }
-
-  Timer {
-    id: stirAlarm
-    repeat: false
-    onTriggered: root.nudge()
+    ticker.interval = decision.wakeIn > tickMs ? decision.wakeIn : tickMs
   }
 
   onBarHiddenChanged: {
@@ -354,7 +350,6 @@ Item {
   }
 
   Component.onCompleted: {
-    lastActivityAt = Date.now()
     var workspace = Hyprland.focusedWorkspace
     if (workspace) _lastWorkspaceId = Number(workspace.id)
     nudge()
@@ -423,12 +418,13 @@ Item {
       id: sprite
 
       // The art cell is 40x25, so the sprite is 1.6 times as wide as it is tall.
-      width: Math.round(root.catSize * 1.6)
-      height: root.catSize
+      width: root.catSize
+      height: root.catHeight
       devicePixels: width * (root.catScreen ? root.catScreen.devicePixelRatio : 1)
       assetDir: root.assetDir
 
       pose: root.catPose
+      mirror: root.catFacing < 0
       animTick: root.animTick
       fillColor: Color.bar.text
       inkColor: Color.bar.background
@@ -436,13 +432,10 @@ Item {
       // Along the bar the cat sits where the brain put it; across the bar it
       // stays centred in the strip.
       readonly property real crossPos:
-        window.stripCentre - height / 2 + bobOffset
+        window.stripCentre - (root.vertical ? width : height) / 2
 
       x: root.vertical ? Math.round(crossPos) : Math.round(root.catPos)
       y: root.vertical ? Math.round(root.catPos) : Math.round(crossPos)
-
-      // A cat listening to music bobs; everything else sits still.
-      property int bobOffset: root.catBob ? ((root.animTick & 1) ? -1 : 0) : 0
 
       MouseArea {
         anchors.fill: parent
@@ -456,7 +449,7 @@ Item {
             catMenu.open = true
             return
           }
-          root.pettedAt = Date.now()
+          root.clickedAt = Date.now()
           root.nudge()
         }
       }
