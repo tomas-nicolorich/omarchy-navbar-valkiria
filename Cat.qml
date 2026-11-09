@@ -70,7 +70,7 @@ Item {
   readonly property int sleepAfter: Number(config.sleepAfter) > 0 ? Number(config.sleepAfter) : 180
   readonly property var reactions: config.reactions && typeof config.reactions === "object"
     ? config.reactions : ({})
-  readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 16
+  readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 25
 
   // Fraction of the bar to keep clear when the cat picks its own spot. Omarchy
   // centres the clock, so the middle is the one place reliably occupied.
@@ -419,12 +419,13 @@ Item {
       height: root.maskActive ? sprite.height : 0
     }
 
-    CatSprite {
+    DogSprite {
       id: sprite
 
-      width: root.catSize
+      // The art cell is 40x25, so the sprite is 1.6 times as wide as it is tall.
+      width: Math.round(root.catSize * 1.6)
       height: root.catSize
-      devicePixels: root.catSize * (root.catScreen ? root.catScreen.devicePixelRatio : 1)
+      devicePixels: width * (root.catScreen ? root.catScreen.devicePixelRatio : 1)
       assetDir: root.assetDir
 
       pose: root.catPose
