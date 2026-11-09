@@ -1,4 +1,4 @@
-// Navbar Cat — a cat that walks along the Omarchy bar.
+// Valkiria — a character that walks along the Omarchy bar (fork of navbar-cat).
 //
 // The plugin is a `kind: "panel"` with `keepLoaded: true`, so the shell mounts
 // it at startup (shell.qml:625) and it lives for the whole session. It draws a
@@ -19,7 +19,6 @@ import Quickshell.Services.Mpris
 import Quickshell.Services.UPower
 import qs.Commons
 import "Brain.js" as Brain
-import "Frames.js" as Frames
 
 Item {
   id: root
@@ -29,31 +28,25 @@ Item {
   property var manifest: null
   property string omarchyPath: ""
 
-  readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "io.github.tallsam.navbar-cat"
+  readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "tomas.valkiria"
   readonly property string assetDir: {
     var dir = manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
     if (dir === "") return ""
     return (dir.indexOf("file://") === 0 ? dir : "file://" + dir) + "/assets"
   }
-  readonly property string helper: {
-    var dir = manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
-    if (dir === "") return ""
-    return dir.replace(/^file:\/\//, "") + "/bin/navbar-cat-cursor"
-  }
-
   // The shell assigns `manifest` after the component is constructed, so every
   // path derived from it is empty for the first moments of life. Nothing that
-  // touches the filesystem may start before this turns true, or the sprite
-  // tries to load `/cat32-fill.png` and the helper is launched as
-  // `/bin/navbar-cat-cursor`.
-  readonly property bool ready: assetDir !== "" && helper !== ""
+  // touches the filesystem may start before this turns true.
+  readonly property bool ready: assetDir !== ""
 
   // ---------------------------------------------------------------- config
 
   // Settings live inline on this plugin's entry in shell.json's `plugins[]`,
-  // per the shell's storage rules.
+  // per the shell's storage rules. A third-party plugin gets a scoped `shell`
+  // with no `shellConfig`, so the file is read directly and watched.
+  property var shellJson: ({})
   readonly property var config: {
-    var settings = shell && shell.shellConfig ? shell.shellConfig.plugins : null
+    var settings = shellJson ? shellJson.plugins : null
     if (Array.isArray(settings)) {
       for (var i = 0; i < settings.length; i++) {
         if (settings[i] && String(settings[i].id || "") === root.pluginId) return settings[i]
@@ -62,21 +55,23 @@ Item {
     return ({})
   }
 
+  FileView {
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try { root.shellJson = JSON.parse(text()) } catch (e) { root.shellJson = ({}) }
+    }
+  }
+
   readonly property real speed: Number(config.speed) > 0 ? Number(config.speed) : 1.0
   readonly property bool pettable: config.pettable !== false
-  readonly property bool chaseCursor: config.chaseCursor !== false
   readonly property int sleepAfter: Number(config.sleepAfter) > 0 ? Number(config.sleepAfter) : 180
   readonly property var reactions: config.reactions && typeof config.reactions === "object"
     ? config.reactions : ({})
   readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 16
 
-  // Unknown names fall back rather than leaving the cat invisible on a typo.
-  readonly property string character: {
-    var wanted = String(config.character || "neko")
-    return Frames.CHARACTERS.indexOf(wanted) !== -1 ? wanted : "neko"
-  }
-
-  readonly property bool pounce: config.pounce !== false
   // Fraction of the bar to keep clear when the cat picks its own spot. Omarchy
   // centres the clock, so the middle is the one place reliably occupied.
   readonly property real avoidCenter: config.avoidCenter !== undefined
@@ -85,11 +80,6 @@ Item {
   readonly property bool rhythm: config.rhythm !== false
   readonly property int stirEvery: Number(config.stirEvery) > 0 ? Number(config.stirEvery) : 150
   readonly property int stirFor: Number(config.stirFor) > 0 ? Number(config.stirFor) : 25
-
-  // Room for the cat to leave the bar during a pounce. The window grows inward
-  // from the bar's own edge; the extra strip is fully transparent and carries
-  // no input region, so it costs nothing when the cat is on the ground.
-  readonly property int headroom: pounce ? Math.round(catSize * 1.5) : 0
 
   // ------------------------------------------------------------ bar state
 
@@ -123,9 +113,22 @@ Item {
 
   // --------------------------------------------------------- world inputs
 
-  property real pointerX: -1
-  property real pointerY: -1
-  property real lastPointerMoveAt: 0
+  // The user counts as away after this long without input. The brain applies
+  // its own (longer) sleep delay on top.
+  readonly property int awayAfterSec: 15
+  property real lastActivityAt: 0
+
+  IdleMonitor {
+    id: idleMonitor
+    timeout: root.awayAfterSec
+    respectInhibitors: false
+    onIsIdleChanged: {
+      // Backdate the start of the absence; on return, the clock restarts.
+      root.lastActivityAt = Date.now() - (isIdle ? root.awayAfterSec * 1000 : 0)
+      if (!isIdle) root.nudge()
+    }
+  }
+
   property real pettedAt: -1
   property var workspaceEvent: null
   property real notifyAt: -1
@@ -184,27 +187,6 @@ Item {
     return !!(device && device.isPresent && !UPower.onBattery)
   }
 
-  // The pointer counts as "at the bar" inside the bar strip plus a small
-  // approach margin, so heading for the bar is enough to summon the cat.
-  readonly property int chaseMargin: 12
-
-  function pointerOnBar() {
-    if (!catScreen || pointerX < 0) return false
-    var sx = catScreen.x, sy = catScreen.y
-    var sw = catScreen.width, sh = catScreen.height
-    if (pointerX < sx || pointerX > sx + sw || pointerY < sy || pointerY > sy + sh) return false
-    var depth = barSize + chaseMargin
-    if (barPosition === "top") return pointerY - sy <= depth
-    if (barPosition === "bottom") return (sy + sh) - pointerY <= depth
-    if (barPosition === "left") return pointerX - sx <= depth
-    return (sx + sw) - pointerX <= depth
-  }
-
-  function pointerAlongBar() {
-    if (!catScreen) return 0
-    return vertical ? pointerY - catScreen.y : pointerX - catScreen.x
-  }
-
   // ------------------------------------------------------------ cat state
 
   readonly property real barLength: catScreen
@@ -215,10 +197,6 @@ Item {
   property string catPose: "stop"
   property bool catBob: false
   property bool catSettled: false
-  // 0 while on the bar, up to 1 at the top of a pounce.
-  property real catLift: 0
-  // Which way is "into the screen" from the bar's edge.
-  readonly property int inwardSign: (barPosition === "top" || barPosition === "left") ? 1 : -1
   property int animTick: 0
   // Seeded from the clock so the cat does not live the same day twice. The
   // brain's generator is deterministic by design — that is what makes the
@@ -227,38 +205,6 @@ Item {
   property var brainState: Brain.freshState(Date.now() % 2147483647)
 
   readonly property bool maskActive: catSettled && root.pettable && !root.barHidden
-
-  // --------------------------------------------------------- cursor feed
-
-  // Hyprland has no cursor-move event and Quickshell exposes no pointer, so
-  // the position is sampled by a helper. See bin/navbar-cat-cursor for why it
-  // talks to the socket directly instead of shelling out to hyprctl.
-  Process {
-    id: cursorFeed
-    running: root.ready && root.chaseCursor && !root.barHidden
-    command: [root.helper]
-    stdinEnabled: true
-
-    stdout: SplitParser {
-      onRead: function (line) {
-        var parts = String(line).trim().split(/\s+/)
-        if (parts.length < 2) return
-        var x = parseInt(parts[0], 10)
-        var y = parseInt(parts[1], 10)
-        if (isNaN(x) || isNaN(y)) return
-        root.pointerX = x
-        root.pointerY = y
-        root.lastPointerMoveAt = Date.now()
-        root.nudge()
-      }
-    }
-  }
-
-  // A sleeping cat does not need the pointer ten times a second. Slowing the
-  // sampler down while it sleeps is most of the reason this costs nothing when
-  // the desktop is idle.
-  readonly property int cursorInterval: catPose === "sleep" ? 500 : 100
-  onCursorIntervalChanged: if (cursorFeed.running) cursorFeed.write(cursorInterval + "\n")
 
   // ------------------------------------------------------- event sources
 
@@ -319,7 +265,6 @@ Item {
 
     var now = Date.now()
     var maxPos = Math.max(0, barLength - catSize)
-    var onBar = pointerOnBar()
 
     // Drop the cat somewhere arbitrary the first time we know how long the bar
     // is. Starting at zero every session meant that on a machine left plugged
@@ -337,9 +282,8 @@ Item {
       barLength: barLength,
       catSize: catSize,
       x: catPos,
-      pointer: onBar ? { onBar: true, pos: pointerAlongBar() } : null,
       pettedAt: pettedAt >= 0 ? pettedAt : null,
-      lastPointerMoveAt: lastPointerMoveAt,
+      lastActivityAt: idleMonitor.isIdle ? lastActivityAt : now,
       music: musicPlaying,
       charging: charging,
       workspaceEvent: workspaceEvent,
@@ -349,10 +293,8 @@ Item {
       themeChangedAt: themeChangedAt >= 0 ? themeChangedAt : null,
       hour: new Date().getHours(),
       config: {
-        chaseCursor: chaseCursor,
         pettable: pettable,
         sleepAfter: sleepAfter,
-        pounce: pounce,
         rhythm: rhythm,
         avoidCenter: avoidCenter,
         stirEvery: stirEvery,
@@ -366,25 +308,18 @@ Item {
     // Move toward the target at whatever pace the brain asked for. Positions
     // are rounded to whole logical pixels: pixel art on fractional offsets
     // shimmers as it moves.
-    if (decision.snap) {
-      // A pounce is an arc the brain describes exactly, frame by frame. Easing
-      // toward it the way we ease toward a walk target would flatten it.
-      catPos = decision.target
-    } else {
-      var pixelsPerSecond = decision.gait === "run" ? 150 : (decision.gait === "walk" ? 55 : 0)
-      if (pixelsPerSecond > 0) {
-        var stepSize = pixelsPerSecond * speed * (tickMs / 1000)
-        var delta = decision.target - catPos
-        catPos = Math.abs(delta) <= stepSize
-          ? decision.target
-          : catPos + (delta > 0 ? stepSize : -stepSize)
-      }
+    var pixelsPerSecond = decision.gait === "run" ? 150 : (decision.gait === "walk" ? 55 : 0)
+    if (pixelsPerSecond > 0) {
+      var stepSize = pixelsPerSecond * speed * (tickMs / 1000)
+      var delta = decision.target - catPos
+      catPos = Math.abs(delta) <= stepSize
+        ? decision.target
+        : catPos + (delta > 0 ? stepSize : -stepSize)
     }
     catPos = Math.max(0, Math.min(maxPos, catPos))
 
     catPose = decision.pose
     catBob = decision.bob
-    catLift = decision.lift
     catSettled = decision.gait === "idle"
 
     // Let a stale scamper expire so it cannot re-fire.
@@ -419,7 +354,7 @@ Item {
   }
 
   Component.onCompleted: {
-    lastPointerMoveAt = Date.now()
+    lastActivityAt = Date.now()
     var workspace = Hyprland.focusedWorkspace
     if (workspace) _lastWorkspaceId = Number(workspace.id)
     nudge()
@@ -429,25 +364,13 @@ Item {
 
   // The menu is the one thing here that writes. It touches only this plugin's
   // own entry in shell.json, only when you pick something, and it goes through
-  // the shell's own mutator rather than editing the file behind its back.
+  // the shell's scoped API (a third-party panel has no mutateShellConfig).
+  // updateEntryInline replaces the entry's settings, so merge into a copy.
   function setSetting(key, value) {
-    if (!shell || typeof shell.mutateShellConfig !== "function") return
-    var id = root.pluginId
-    shell.mutateShellConfig(function (cfg) {
-      if (!Array.isArray(cfg.plugins)) cfg.plugins = []
-      var entry = null
-      for (var i = 0; i < cfg.plugins.length; i++) {
-        if (cfg.plugins[i] && String(cfg.plugins[i].id || "") === id) {
-          entry = cfg.plugins[i]
-          break
-        }
-      }
-      if (!entry) {
-        entry = { id: id }
-        cfg.plugins.push(entry)
-      }
-      entry[key] = value
-    })
+    if (!shell || typeof shell.updateEntryInline !== "function") return
+    var next = JSON.parse(JSON.stringify(root.config))
+    next[key] = value
+    shell.updateEntryInline(root.pluginId, next)
   }
 
   CatMenu {
@@ -467,7 +390,7 @@ Item {
     color: "transparent"
 
     exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "navbar-cat"
+    WlrLayershell.namespace: "valkiria"
     // Above the bar (which sits on Top), matching what the bar's own drag
     // ghost does when it needs to float over everything.
     WlrLayershell.layer: WlrLayer.Overlay
@@ -479,22 +402,12 @@ Item {
       left: root.barPosition !== "right"
       right: root.barPosition !== "left"
     }
-    // The window covers the bar strip plus the pounce headroom, growing inward
-    // from the bar's edge. The extra strip is transparent and unmasked, so it
-    // changes nothing until the cat actually leaves the ground.
-    implicitWidth: root.vertical ? root.barSize + root.headroom : 0
-    implicitHeight: root.vertical ? 0 : root.barSize + root.headroom
+    // The window covers exactly the bar strip.
+    implicitWidth: root.vertical ? root.barSize : 0
+    implicitHeight: root.vertical ? 0 : root.barSize
 
-    // Where the middle of the bar strip sits inside this window. For a top or
-    // left bar that is simply half the bar in; for the far edges the headroom
-    // is on the near side, so it is measured back from the far end.
-    readonly property real stripCentre: root.vertical
-      ? (root.barPosition === "left" ? root.barSize / 2 : window.width - root.barSize / 2)
-      : (root.barPosition === "top" ? root.barSize / 2 : window.height - root.barSize / 2)
-
-    // How far off the bar the cat currently is, in pixels, signed so that
-    // positive is always *into* the screen.
-    readonly property real liftOffset: root.catLift * root.headroom * root.inwardSign
+    // Where the middle of the bar strip sits inside this window.
+    readonly property real stripCentre: root.barSize / 2
 
     // Click-through everywhere the cat is not. While it is walking the region
     // is empty, so a moving cat can never swallow a click meant for the bar;
@@ -513,7 +426,6 @@ Item {
       height: root.catSize
       devicePixels: root.catSize * (root.catScreen ? root.catScreen.devicePixelRatio : 1)
       assetDir: root.assetDir
-      character: root.character
 
       pose: root.catPose
       animTick: root.animTick
@@ -521,9 +433,9 @@ Item {
       inkColor: Color.bar.background
 
       // Along the bar the cat sits where the brain put it; across the bar it
-      // rides the pounce arc out of the strip and back.
+      // stays centred in the strip.
       readonly property real crossPos:
-        window.stripCentre + window.liftOffset - height / 2 + bobOffset
+        window.stripCentre - height / 2 + bobOffset
 
       x: root.vertical ? Math.round(crossPos) : Math.round(root.catPos)
       y: root.vertical ? Math.round(root.catPos) : Math.round(crossPos)

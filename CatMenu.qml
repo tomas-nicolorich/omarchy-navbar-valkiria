@@ -31,7 +31,7 @@ PanelWindow {
   color: "transparent"
 
   exclusionMode: ExclusionMode.Ignore
-  WlrLayershell.namespace: "navbar-cat-menu"
+  WlrLayershell.namespace: "valkiria-menu"
   WlrLayershell.layer: WlrLayer.Overlay
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
@@ -85,7 +85,7 @@ PanelWindow {
       spacing: Style.space(2)
 
       Text {
-        text: "Navbar Cat"
+        text: "Valkiria"
         color: Color.popups.text
         opacity: 0.55
         font.family: Style.fontFamily
@@ -123,31 +123,10 @@ PanelWindow {
         signal tapped()
       }
 
+      // The menu's remaining items arrive with ticket 005.
       Row {
-        label: "neko"; active: menu.cat && menu.cat.character === "neko"
-        onTapped: { menu.chose("character", "neko"); menu.open = false }
-      }
-      Row {
-        label: "tora"; active: menu.cat && menu.cat.character === "tora"
-        onTapped: { menu.chose("character", "tora"); menu.open = false }
-      }
-      Row {
-        label: "dog"; active: menu.cat && menu.cat.character === "dog"
-        onTapped: { menu.chose("character", "dog"); menu.open = false }
-      }
-
-      Rectangle {
-        width: Style.space(150); height: 1
-        color: Color.popups.border; opacity: 0.4
-      }
-
-      Row {
-        label: "pounce"; active: menu.cat && menu.cat.pounce
-        onTapped: { menu.chose("pounce", !(menu.cat && menu.cat.pounce)); menu.open = false }
-      }
-      Row {
-        label: "chase cursor"; active: menu.cat && menu.cat.chaseCursor
-        onTapped: { menu.chose("chaseCursor", !(menu.cat && menu.cat.chaseCursor)); menu.open = false }
+        label: "pettable"; active: menu.cat && menu.cat.pettable
+        onTapped: { menu.chose("pettable", !(menu.cat && menu.cat.pettable)); menu.open = false }
       }
     }
   }

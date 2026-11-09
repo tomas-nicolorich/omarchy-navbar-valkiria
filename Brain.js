@@ -26,13 +26,6 @@ var SCAMPER_MS = 1200
 var SCAMPER_DISTANCE = 160
 // Close enough to count as arrived.
 var ARRIVE_EPS = 2
-// How long a pounce takes from crouch to landing.
-var POUNCE_MS = 600
-// And how long before it may pounce again, so batting at the pointer stays
-// playful rather than becoming a twitch.
-var POUNCE_COOLDOWN_MS = 6000
-// How far along the bar a pounce carries the cat.
-var POUNCE_REACH = 14
 // How long the cat keeps looking after the last toast has gone. Its attention
 // otherwise lasts exactly as long as the toast is on screen, because toasts do
 // not all last the same time — a critical one stays until dismissed, and a cat
@@ -66,12 +59,7 @@ function freshState(seed) {
     // up, potters about, and settles again.
     nextStirAt: null,
     stirUntil: null,
-    // Which way the cat last travelled, so a pounce has a direction to go in
-    // even though it launches from a standstill.
     lastDir: 1,
-    pounceStartedAt: null,
-    pounceFrom: 0,
-    lastPounceAt: null,
   }
 }
 
@@ -189,16 +177,6 @@ function intent(input, state) {
     }
   }
 
-  // 2. Pointer on the bar.
-  if (config.chaseCursor !== false && input.pointer && input.pointer.onBar) {
-    return {
-      reason: "chase",
-      target: input.pointer.pos - input.catSize / 2,
-      gait: "run",
-      rest: "wait",
-    }
-  }
-
   // 3. Startled — by something you did, or by the world changing colour.
   //
   //    Both are the same movement: a short bolt and then a wait. They share a
@@ -309,8 +287,9 @@ function intent(input, state) {
     }
   }
 
-  // 7. Nobody has touched the pointer in a long while.
-  if (now - input.lastPointerMoveAt
+  // 7. The user has been away (no keyboard or pointer activity) a long while.
+  //    `lastActivityAt` comes from the body's idle monitor.
+  if (now - input.lastActivityAt
       > (config.sleepAfter || 180) * 1000 * rhythm.sleepAfterScale) {
     return {
       reason: "idle-sleep",
@@ -334,30 +313,10 @@ function intent(input, state) {
   }
 }
 
-// The frame for a diagonal leap. Which diagonal depends on the edge the bar is
-// docked to, because "out of the bar" means down on a top bar and up on a
-// bottom one — leaping the wrong way would take the cat off the screen.
-//
-//   alongDir  which way it is facing down the length of the bar (-1 / +1)
-//   outward   +1 while leaving the bar, -1 while dropping back into it
-function leapPose(edge, alongDir, outward) {
-  var dx, dy
-  if (edge === "left" || edge === "right") {
-    dy = alongDir
-    dx = edge === "left" ? outward : -outward
-  } else {
-    dx = alongDir
-    dy = edge === "top" ? outward : -outward
-  }
-  if (dy < 0) return dx < 0 ? "upleft" : "upright"
-  return dx < 0 ? "dwleft" : "dwright"
-}
-
 function decide(input, state) {
   state = state || freshState()
   var maxX = Math.max(0, input.barLength - input.catSize)
   var vertical = input.axis === "v"
-  var edge = input.edge || (vertical ? "left" : "top")
   var now = input.now
 
   var want = intent(input, state)
@@ -366,47 +325,10 @@ function decide(input, state) {
   var delta = target - input.x
   var moving = want.gait !== "idle" && Math.abs(delta) > ARRIVE_EPS
 
-  // Reaching the pointer is the cue to pounce at it. Anything else the cat is
-  // doing takes priority, and the cooldown keeps it from turning into a tic.
   var config = input.config || {}
-  var pouncing = state.pounceStartedAt !== null && state.pounceStartedAt !== undefined
-  if (!pouncing && config.pounce !== false && want.reason === "chase" && !moving
-      && (state.lastPounceAt === null || state.lastPounceAt === undefined
-          || now - state.lastPounceAt >= POUNCE_COOLDOWN_MS)) {
-    state.pounceStartedAt = now
-    state.pounceFrom = input.x
-    pouncing = true
-  }
-  if (pouncing) {
-    var progress = (now - state.pounceStartedAt) / POUNCE_MS
-    if (progress >= 1) {
-      state.pounceStartedAt = null
-      state.lastPounceAt = now
-    } else {
-      // A half-sine arc: off the ground, over, and back down.
-      var leapTarget = clamp(
-        state.pounceFrom + state.lastDir * POUNCE_REACH * progress, 0, maxX)
-      state.pose = leapPose(edge, state.lastDir, progress < 0.5 ? 1 : -1)
-      return {
-        reason: "pounce",
-        target: leapTarget,
-        gait: "run",
-        pose: state.pose,
-        lift: Math.sin(Math.PI * progress),
-        // The arc is described exactly rather than chased, so the body should
-        // place the cat where it is told instead of easing toward it.
-        snap: true,
-        bob: false,
-        pettable: false,
-        idle: false,
-        wakeIn: 0,
-        state: state,
-      }
-    }
-  }
 
   // A stir schedule belongs to the states that can end in sleep. If the cat is
-  // up for a real reason — chased, petted, startled — drop it, so it does not
+  // up for a real reason — petted, startled — drop it, so it does not
   // fire the moment the cat next settles.
   if (!want.sleepy && want.reason !== "stir") {
     state.nextStirAt = null
@@ -424,7 +346,7 @@ function decide(input, state) {
       state.pose = "awake"
       return {
         reason: want.reason, target: target, gait: "idle", pose: "awake",
-        lift: 0, snap: false, bob: false, pettable: false, idle: false,
+        bob: false, pettable: false, idle: false,
         wakeIn: 0, state: state,
       }
     } else {
@@ -441,7 +363,7 @@ function decide(input, state) {
       : (delta > 0 ? "right" : "left")
     return {
       reason: want.reason, target: target, gait: want.gait, pose: state.pose,
-      lift: 0, snap: false, bob: false, pettable: false, idle: false,
+      bob: false, pettable: false, idle: false,
       wakeIn: 0, state: state,
     }
   }
@@ -481,7 +403,7 @@ function decide(input, state) {
   state.pose = pose
 
   // A cat that has just dropped off books its own next stir. Without this it
-  // would sleep until the pointer moved, which on an unattended machine means
+  // would sleep until the user came back, which on an unattended machine means
   // forever.
   if (pose === "sleep"
       && (state.nextStirAt === null || state.nextStirAt === undefined)) {
@@ -494,8 +416,6 @@ function decide(input, state) {
     target: target,
     gait: "idle",
     pose: pose,
-    lift: 0,
-    snap: false,
     bob: want.bob === true,
     pettable: config.pettable !== false,
     idle: pose === "sleep",

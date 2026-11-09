@@ -1,16 +1,23 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.tallsam.navbar-cat",
-  "name": "Navbar Cat",
-  "version": "1.2.0",
-  "author": "tallsam",
+  "id": "tomas.valkiria",
+  "name": "Valkiria",
+  "version": "0.1.0",
+  "author": "Tomas",
   "license": "MIT",
-  "description": "A cat that walks along the bar, reacts to what you are doing, and can be petted",
+  "description": "A valkyrie that roams the bar and its yard",
   "kinds": [
+    "bar-widget",
     "panel"
   ],
   "keepLoaded": true,
   "entryPoints": {
+    "barWidget": "Widget.qml",
     "panel": "Cat.qml"
+  },
+  "barWidget": {
+    "displayName": "Valkiria Yard",
+    "category": "Plugin",
+    "allowMultiple": false
   }
 }
