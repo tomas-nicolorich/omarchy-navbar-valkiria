@@ -5,7 +5,7 @@ and its yard. Early work in progress.
 
 Two parts, one plugin (`tomas.valkiria`):
 
-- an overlay panel (`Cat.qml`) that draws the character over the bar and
+- an overlay panel (`Valkiria.qml`) that draws the character over the bar and
   decides what it does (`Brain.js`, pure and tested);
 - a bar widget (`Widget.qml`), the yard, which reserves a slot in the bar and
   tells the overlay where it is through a plugin-local singleton (`Yard.qml`).

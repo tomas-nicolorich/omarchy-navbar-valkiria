@@ -13,7 +13,7 @@
   "keepLoaded": true,
   "entryPoints": {
     "barWidget": "Widget.qml",
-    "panel": "Cat.qml"
+    "panel": "Valkiria.qml"
   },
   "barWidget": {
     "displayName": "Valkiria Yard",
