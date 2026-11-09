@@ -4,9 +4,9 @@
 // it at startup (shell.qml:625) and it lives for the whole session. It draws a
 // transparent strip over the bar on WlrLayer.Overlay — the same layer the bar's
 // own drag ghost uses (Bar.qml:1167) — and is click-through everywhere except a
-// small box around the cat while it is sitting still.
+// small box around her while she is sitting still.
 //
-// All of the cat's decision-making lives in Brain.js, which is pure and tested.
+// All of her decision-making lives in Brain.js, which is pure and tested.
 // This file is the body: it gathers what is going on, hands a snapshot to the
 // brain each tick, and moves the sprite toward whatever the brain asked for.
 
@@ -84,13 +84,12 @@ Item {
   property var command: null
   // Her length along the bar, in logical px: the art is 40x25 art px drawn at
   // 32x20 logical px (1 art px = 0.8 logical px, 1:1 device px at scale 1.25).
-  readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 32
-  readonly property int catHeight: Math.round(catSize * 25 / 40)
+  readonly property int dogSize: Number(config.size) > 0 ? Number(config.size) : 32
+  readonly property int dogHeight: Math.round(dogSize * 25 / 40)
 
-  // Brain config: sleep, walkies, meals, siesta, yardWidth, tripsPerHour,
-  // greetAfter, idleBurrowAfter, siestaBurrowAfter, lowBattery, reactions.
-  // Absent keys fall back to the brain's own defaults.
-  readonly property var brainConfig: config
+  // `config` is also the brain's config: sleep, walkies, meals, siesta,
+  // yardWidth, tripsPerHour, greetAfter, idleBurrowAfter, siestaBurrowAfter,
+  // lowBattery, reactions. Absent keys fall back to the brain's own defaults.
 
   // ------------------------------------------------------------ bar state
 
@@ -102,16 +101,11 @@ Item {
 
   // ------------------------------------------------------------- monitors
 
-  // One cat, on the output Hyprland has focused, so it follows you between
-  // screens rather than multiplying. Not at once: Brain.followStep waits for
-  // focus to settle, then walks her off one bar and onto the other, and says
-  // which screen she is on (shownScreenName) meanwhile.
-  readonly property string pinnedMonitor: {
-    var wanted = String(config.monitor || "focused")
-    return wanted === "focused" ? "" : wanted
-  }
+  // One Valkiria, on the output Hyprland has focused, so she follows you
+  // between screens rather than multiplying. Not at once: Brain.followStep
+  // waits for focus to settle, then walks her off one bar and onto the other,
+  // and says which screen she is on (shownScreenName) meanwhile.
   readonly property string wantedScreenName: {
-    if (pinnedMonitor !== "") return pinnedMonitor
     var monitor = Hyprland.focusedMonitor
     return monitor ? String(monitor.name || "") : ""
   }
@@ -123,7 +117,7 @@ Item {
   }
   property string shownScreenName: ""
   property var followState: null
-  readonly property var catScreen: {
+  readonly property var dogScreen: {
     var screens = Quickshell.screens
     if (!screens || screens.length === 0) return null
     for (var i = 0; i < screens.length; i++) {
@@ -195,7 +189,7 @@ Item {
     return Math.round(Number(device.percentage) * (Number(device.percentage) <= 1 ? 100 : 1))
   }
 
-  // A theme switch repaints the cat mid-stride, which is a good excuse to have
+  // A theme switch repaints her mid-stride, which is a good excuse to have
   // it startle. The first assignment is the initial colour, not a change.
   readonly property color themeInk: Color.bar.text
   property bool _themeSeen: false
@@ -216,38 +210,50 @@ Item {
     return false
   }
 
-  // A machine with no battery reports onBattery false forever, which would
-  // read as "permanently charging" and leave the cat asleep for good. Only
-  // count it as charging when there is actually a battery being charged.
+  // A machine with no battery reports onBattery false forever, so only count
+  // it as charging when there is actually a battery on the charger. This is a
+  // state, used for the low-battery mood; the nap is a reaction to the plug
+  // going in (chargerAt below).
   readonly property bool charging: {
-    if (reactions.charging === false) return false
     var device = UPower.displayDevice
     return !!(device && device.isPresent && !UPower.onBattery)
   }
 
-  // ------------------------------------------------------------ cat state
+  // When the charger was last plugged in (onBattery going true to false).
+  property real chargerAt: -1
+  Connections {
+    target: UPower
+    function onOnBatteryChanged() {
+      var device = UPower.displayDevice
+      if (UPower.onBattery || !device || !device.isPresent) return
+      root.chargerAt = Date.now()
+      root.nudge()
+    }
+  }
+
+  // ---------------------------------------------------------- dog state
 
   // Her extent along the bar (the sprite is not rotated on a vertical bar).
-  readonly property int alongSize: vertical ? catHeight : catSize
+  readonly property int alongSize: vertical ? dogHeight : dogSize
 
-  readonly property real barLength: catScreen
-    ? (vertical ? catScreen.height : catScreen.width)
+  readonly property real barLength: dogScreen
+    ? (vertical ? dogScreen.height : dogScreen.width)
     : 0
 
-  property real catPos: 0
-  property string catPose: "sit"
-  property int catFacing: 1
-  property bool catSettled: false
+  property real dogPos: 0
+  property string dogPose: "sit"
+  property int dogFacing: 1
+  property bool dogSettled: false
   property int animTick: 0
   // Seeded from the clock so she does not live the same day twice (the brain's
   // generator is deterministic, which is what makes its tests reproducible).
   property var brainState: Brain.freshState(Date.now() % 2147483647)
 
   // Where the yard widget sits on the screen she is on (Yard.qml singleton).
-  readonly property var yardRecord: catScreen ? Yard.xs[String(catScreen.name)] : undefined
+  readonly property var yardRecord: dogScreen ? Yard.xs[String(dogScreen.name)] : undefined
   readonly property var yardForBrain: yardRecord ? { x: yardRecord.x, w: yardRecord.w } : null
 
-  readonly property bool maskActive: catSettled && root.pettable && !root.barHidden
+  readonly property bool maskActive: dogSettled && root.pettable && !root.barHidden
 
   // ------------------------------------------------------- event sources
 
@@ -269,16 +275,16 @@ Item {
   onMusicPlayingChanged: nudge()
   onChargingChanged: nudge()
   onBarPositionChanged: nudge()
-  onCatScreenChanged: nudge()
+  onDogScreenChanged: nudge()
 
   // ------------------------------------------------------------ the tick
 
-  // 30fps: fast enough that a running cat does not visibly stutter, slow
+  // 30fps: fast enough that a running dog does not visibly stutter, slow
   // enough to be free. The sprite's own frames advance far slower (below).
   readonly property int tickMs: 33
 
   function nudge() {
-    // Something happened that the cat might care about — make sure the loop is
+    // Something happened that she might care about — make sure the loop is
     // running to notice it.
     ticker.interval = tickMs
     if (!ticker.running && !barHidden) ticker.running = true
@@ -298,7 +304,7 @@ Item {
     id: animator
     // Frames advance far slower than the movement updates; this keeps the
     // walk cycle looking drawn rather than frantic.
-    interval: 150
+    interval: Brain.FRAME_MS
     repeat: true
     // With animations off (`omarchy toggle animations`) she holds one frame
     // per pose rather than cycling.
@@ -318,15 +324,15 @@ Item {
     // Which monitor she is on, and whether she is crossing between two.
     var follow = Brain.followStep(followState, {
       now: Date.now(), focused: wantedScreenName, screens: screenNames, dnd: dnd,
-      x: catPos, barLength: barLength, catSize: alongSize,
+      x: dogPos, barLength: barLength, dogSize: alongSize,
     })
     followState = follow.mstate
     if (follow.screen !== null && follow.screen !== shownScreenName) shownScreenName = follow.screen
-    // Property bindings (catScreen, barLength) have caught up by now, so a
+    // Property bindings (dogScreen, barLength) have caught up by now, so a
     // hand-over puts her at the entry edge of the new bar.
-    if (follow.switched) catPos = follow.transit.side < 0 ? -alongSize : barLength
+    if (follow.switched) dogPos = follow.transit.side < 0 ? -alongSize : barLength
 
-    if (!catScreen || barLength <= 0) return
+    if (!dogScreen || barLength <= 0) return
 
     var now = Date.now()
     var date = new Date(now)
@@ -338,23 +344,24 @@ Item {
     // She starts the session at home in the yard.
     if (!_placed) {
       _placed = true
-      var span = Brain.yardSpan({ barLength: barLength, catSize: alongSize,
-        yard: yardForBrain, config: brainConfig })
-      catPos = span.lo
+      var span = Brain.yardSpan({ barLength: barLength, dogSize: alongSize,
+        yard: yardForBrain, config: config })
+      dogPos = span.lo
     }
 
     var decision = Brain.decide({
       now: now,
       axis: vertical ? "v" : "h",
       barLength: barLength,
-      catSize: alongSize,
-      x: catPos,
+      dogSize: alongSize,
+      x: dogPos,
       yard: yardForBrain,
       minutes: date.getHours() * 60 + date.getMinutes(),
       day: date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate(),
       idleFor: idleMonitor.isIdle && awaySince > 0 ? now - awaySince : 0,
       music: musicPlaying,
       charging: charging,
+      chargerAt: chargerAt >= 0 ? chargerAt : null,
       batteryPct: batteryPct,
       dnd: dnd,
       bedtime: bedtime,
@@ -365,7 +372,7 @@ Item {
       themeChangedAt: themeChangedAt >= 0 ? themeChangedAt : null,
       workspaceEvent: workspaceEvent,
       clickedAt: clickedAt >= 0 ? clickedAt : null,
-      config: brainConfig,
+      config: config,
     }, brainState)
 
     brainState = decision.state
@@ -377,19 +384,19 @@ Item {
       : (decision.gait === "walk" ? Brain.WALK_PX_S : 0)
     if (pixelsPerSecond > 0) {
       var stepSize = pixelsPerSecond * decision.speedScale * speed * (tickMs / 1000)
-      var delta = decision.target - catPos
-      catPos = (Math.abs(delta) <= stepSize || !motion)
+      var delta = decision.target - dogPos
+      dogPos = (Math.abs(delta) <= stepSize || !motion)
         ? decision.target
-        : catPos + (delta > 0 ? stepSize : -stepSize)
+        : dogPos + (delta > 0 ? stepSize : -stepSize)
     }
-    catPos = Math.max(minPos, Math.min(limitPos, catPos))
+    dogPos = Math.max(minPos, Math.min(limitPos, dogPos))
 
-    catPose = decision.pose
-    catFacing = decision.facing
-    catSettled = decision.pettable
+    dogPose = decision.pose
+    dogFacing = decision.facing
+    dogSettled = decision.pettable
     sleeping = decision.sleeping
     if (decision.clearBedtime && bedtime === "up") setSettings({ bedtime: null })
-    Yard.cat(String(catScreen.name), decision.pose)
+    Yard.dog(String(dogScreen.name), decision.pose)
 
     ticker.interval = decision.wakeIn > tickMs ? decision.wakeIn : tickMs
   }
@@ -410,24 +417,22 @@ Item {
   // The menu is the one thing here that writes. It touches only this plugin's
   // own entry in shell.json, only when you pick something, and it goes through
   // the shell's scoped API (a third-party panel has no mutateShellConfig).
-  // updateEntryInline replaces the entry's settings, so merge into a copy.
+  // updateEntryInline replaces the entry's settings, so send it that entry's
+  // own keys plus the change (Config.settingsToSave), never the merged config.
+  // A key patched to null is deleted from the file.
   function setSettings(patch) {
-    var next = JSON.parse(JSON.stringify(root.config))
-    var shown = JSON.parse(JSON.stringify(root.overrides))
-    for (var key in patch) {
-      next[key] = patch[key]
-      shown[key] = patch[key]
-    }
+    var pending = JSON.parse(JSON.stringify(root.overrides))
+    for (var key in patch) pending[key] = patch[key]
     // Show it now; the file watcher replaces this with what was really saved.
-    root.overrides = shown
+    root.overrides = pending
     nudge()
     if (!shell || typeof shell.updateEntryInline !== "function") return
-    shell.updateEntryInline(root.pluginId, next)
+    shell.updateEntryInline(root.pluginId, Config.settingsToSave(root.shellJson, root.pluginId, pending))
   }
 
-  CatMenu {
-    id: catMenu
-    cat: root
+  DogMenu {
+    id: dogMenu
+    dog: root
     rows: Menu.items({ sleeping: root.sleeping, dnd: root.dnd })
     onPicked: function (id) {
       var result = Menu.apply(id, root.config, Date.now())
@@ -445,8 +450,8 @@ Item {
   PanelWindow {
     id: window
 
-    screen: root.catScreen
-    visible: root.catScreen !== null && !root.barHidden
+    screen: root.dogScreen
+    visible: root.dogScreen !== null && !root.barHidden
     color: "transparent"
 
     exclusionMode: ExclusionMode.Ignore
@@ -469,9 +474,9 @@ Item {
     // Where the middle of the bar strip sits inside this window.
     readonly property real stripCentre: root.barSize / 2
 
-    // Click-through everywhere the cat is not. While it is walking the region
-    // is empty, so a moving cat can never swallow a click meant for the bar;
-    // it only becomes clickable once it has settled somewhere.
+    // Click-through everywhere she is not. While she is walking the region
+    // is empty, so a moving dog can never swallow a click meant for the bar;
+    // she only becomes clickable once she has settled somewhere.
     mask: Region {
       x: root.maskActive ? Math.round(sprite.x) : 0
       y: root.maskActive ? Math.round(sprite.y) : 0
@@ -483,24 +488,25 @@ Item {
       id: sprite
 
       // The art cell is 40x25, so the sprite is 1.6 times as wide as it is tall.
-      width: root.catSize
-      height: root.catHeight
-      devicePixels: width * (root.catScreen ? root.catScreen.devicePixelRatio : 1)
+      width: root.dogSize
+      height: root.dogHeight
+      devicePixels: width * (root.dogScreen ? root.dogScreen.devicePixelRatio : 1)
       assetDir: root.assetDir
 
-      pose: root.catPose
-      mirror: root.catFacing < 0
+      pose: root.dogPose
+      mirror: root.dogFacing < 0
       animTick: root.animTick
       fillColor: Color.bar.text
       inkColor: Color.bar.background
+      accentColor: Color.accent
 
-      // Along the bar the cat sits where the brain put it; across the bar it
+      // Along the bar she sits where the brain put her; across the bar she
       // stays centred in the strip.
       readonly property real crossPos:
         window.stripCentre - (root.vertical ? width : height) / 2
 
-      x: root.vertical ? Math.round(crossPos) : Math.round(root.catPos)
-      y: root.vertical ? Math.round(root.catPos) : Math.round(crossPos)
+      x: root.vertical ? Math.round(crossPos) : Math.round(root.dogPos)
+      y: root.vertical ? Math.round(root.dogPos) : Math.round(crossPos)
 
       MouseArea {
         anchors.fill: parent
@@ -508,10 +514,10 @@ Item {
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onClicked: function (mouse) {
           if (mouse.button === Qt.RightButton) {
-            catMenu.anchorPos = root.vertical
+            dogMenu.anchorPos = root.vertical
               ? sprite.y + sprite.height / 2
               : sprite.x + sprite.width / 2
-            catMenu.open = true
+            dogMenu.open = true
             return
           }
           root.clickedAt = Date.now()

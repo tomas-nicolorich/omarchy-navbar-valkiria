@@ -1,7 +1,7 @@
 # Valkiria
 
-An [Omarchy](https://omarchy.org) shell plugin: a valkyrie that roams the bar
-and its yard. Early work in progress.
+An [Omarchy](https://omarchy.org) shell plugin: a black-and-tan miniature
+dachshund that roams the bar and its yard. Early work in progress.
 
 Two parts, one plugin (`tomas.valkiria`):
 
@@ -33,6 +33,9 @@ The contract for a frame:
   them doesn't matter, only alpha does: the plugin tints each layer from the
   bar's colours. `fill` covers the whole silhouette; `ink` and `accent` are
   painted on top of it, so don't cut holes in `fill` for them.
+- The red harness is drawn in `ink`. Morning walkies use their own frames,
+  `art/walk-harness-1.svg` ... `walk-harness-4.svg`: copies of `walk-<n>` whose
+  `ink` group also holds the harness straps (keep `fill` and `accent` the same).
 - She faces right (the sprite mirrors itself for left). Her feet sit on row 22
   (the bottom edge of the feet at y=23) so poses don't jump.
 

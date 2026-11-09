@@ -12,30 +12,35 @@ QtObject {
   // window (logical px). A missing key means "no yard on that screen".
   property var xs: ({})
 
-  // Reassigns `xs` rather than mutating it, so bindings fire. Writes only when
-  // something actually changed, so a polling caller costs nothing.
+  // A copy of `xs` without the entry for `skip`. `xs` is reassigned rather
+  // than mutated, so bindings fire.
+  function _copyXs(skip) {
+    var next = ({})
+    for (var k in xs) if (k !== skip) next[k] = xs[k]
+    return next
+  }
+
+  // Writes only when something actually changed, so a polling caller costs
+  // nothing.
   function report(name, x, w) {
     var cur = xs[name]
     if (cur && cur.x === x && cur.w === w) return
-    var next = ({})
-    for (var k in xs) next[k] = xs[k]
+    var next = _copyXs(name)
     next[name] = { x: x, w: w }
     xs = next
   }
 
   // Where she is and what she is doing, so each yard can show its folded
   // blanket unless she is under it.
-  property string catScreen: ""
-  property string catPose: ""
-  function cat(screenName, pose) {
-    if (catScreen !== screenName) catScreen = screenName
-    if (catPose !== pose) catPose = pose
+  property string dogScreen: ""
+  property string dogPose: ""
+  function dog(screenName, pose) {
+    if (dogScreen !== screenName) dogScreen = screenName
+    if (dogPose !== pose) dogPose = pose
   }
 
   function clear(name) {
     if (xs[name] === undefined) return
-    var next = ({})
-    for (var k in xs) if (k !== name) next[k] = xs[k]
-    xs = next
+    xs = _copyXs(name)
   }
 }

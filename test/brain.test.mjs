@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(join(REPO, "Brain.js"), "utf8");
 const Brain = new Function(
-  `${source}\nreturn { decide, freshState, yardSpan, followStep, WALK_PX_S, RUN_PX_S };`,
+  `${source}\nreturn { decide, freshState, yardSpan, followStep, WALK_PX_S, RUN_PX_S, FRAME_MS };`,
 )();
 
 const BAR = 1536;
@@ -40,7 +40,7 @@ class Sim {
     this.x = over.x ?? 620;
     this.state = Brain.freshState(over.seed ?? 42);
     this.input = {
-      axis: "h", barLength: BAR, catSize: CAT, yard: YARD,
+      axis: "h", barLength: BAR, dogSize: CAT, yard: YARD,
       ...NOON,
       idleFor: 0, music: false, charging: false, batteryPct: 80, dnd: false,
       greet: null, notifyAt: null, themeChangedAt: null, workspaceEvent: null,
@@ -52,6 +52,8 @@ class Sim {
     this.trace = [];
   }
   set(over) { Object.assign(this.input, over); return this; }
+  // The charger goes in: a one-off event, seen once.
+  plug() { this.input.chargerAt = this.t + 1; return this; }
   config(over) { this.input.config = { ...this.input.config, ...over }; return this; }
   at(h, m = 0) { this.input.minutes = h * 60 + m; return this; }
   tick(dt = 100) {
@@ -92,12 +94,12 @@ function distinctPoses(trace) {
 // ------------------------------------------------------------ settling
 
 test("the yard span is the widget's slot, minus her own length", () => {
-  const span = Brain.yardSpan({ barLength: BAR, catSize: CAT, yard: YARD, config: {} });
+  const span = Brain.yardSpan({ barLength: BAR, dogSize: CAT, yard: YARD, config: {} });
   assert.deepEqual(span, SPAN);
 });
 
 test("with no yard placed she gets a default spot inside the bar", () => {
-  const span = Brain.yardSpan({ barLength: BAR, catSize: CAT, yard: null, config: {} });
+  const span = Brain.yardSpan({ barLength: BAR, dogSize: CAT, yard: null, config: {} });
   assert.ok(span.lo >= 0 && span.hi <= BAR - CAT && span.hi >= span.lo);
   assert.ok(span.lo > BAR / 2, "centerEnd-ish: right of the middle");
 });
@@ -272,6 +274,16 @@ test("morning walkies: the whole bar, harness on, once a day, then home", () => 
   sim.until((o) => o.harness, 5 * MIN);
 });
 
+test("walkies are drawn in the harness: every moving frame uses the harness walk", () => {
+  const sim = new Sim({ seed: 6 }).config({ tripsPerHour: 0.1 });
+  sim.at(9, 15).until((o) => o.harness);
+  sim.run(3 * MIN, 250);
+  const walking = sim.trace.filter((r) => r.harness && r.gait === "walk");
+  assert.ok(walking.length > 0);
+  assert.ok(walking.every((r) => r.pose === "walk-harness"));
+  assert.ok(sim.trace.filter((r) => !r.harness).every((r) => r.pose !== "walk-harness"));
+});
+
 test("walkies is configurable and can be turned off", () => {
   const sim = new Sim({ seed: 6 }).config({ walkies: "14:30", tripsPerHour: 0.1 });
   sim.at(9, 20).run(5 * MIN);
@@ -286,10 +298,9 @@ test("walkies is configurable and can be turned off", () => {
 // ------------------------------------------------------------- blanket
 
 test("blanket sequence: burrow, then breathing, then wriggle, then stretch", () => {
-  const sim = new Sim({ seed: 9 }).set({ charging: true });
+  const sim = new Sim({ seed: 9 }).plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
-  sim.run(10_000);
-  sim.set({ charging: false });
+  sim.until((o) => o.pose === "stretch", 30 * MIN);
   sim.run(8000);
   const seq = distinctPoses(sim.trace).filter((p) => ["burrow", "blanket", "wriggle", "stretch"].includes(p));
   assert.deepEqual(seq, ["burrow", "blanket", "wriggle", "stretch"]);
@@ -298,7 +309,7 @@ test("blanket sequence: burrow, then breathing, then wriggle, then stretch", () 
 test("the blanket happens only in the yard", () => {
   for (const reason of ["charging", "idleFor", "night"]) {
     const sim = new Sim({ x: 1300, seed: 12 });
-    if (reason === "charging") sim.set({ charging: true });
+    if (reason === "charging") sim.plug();
     if (reason === "idleFor") sim.set({ idleFor: 10 * MIN });
     if (reason === "night") sim.at(2, 0);
     sim.run(2 * MIN, 250);
@@ -310,16 +321,15 @@ test("the blanket happens only in the yard", () => {
 });
 
 test("she sleeps at the blanket end of the yard", () => {
-  const sim = new Sim().set({ charging: true });
+  const sim = new Sim().plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
   assert.equal(sim.x, SPAN.hi);
 });
 
 test("wakes with a stretch then goes back to yard life", () => {
-  const sim = new Sim().set({ charging: true });
+  const sim = new Sim().plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
-  sim.set({ charging: false });
-  sim.until((o) => o.pose === "stretch");
+  sim.until((o) => o.pose === "stretch", 30 * MIN);
   sim.run(3000);
   assert.ok(!["blanket", "burrow", "stretch"].includes(sim.last.pose));
 });
@@ -335,11 +345,21 @@ test("idle: after being away long enough she goes home and burrows", () => {
   assert.ok(inYard(sim.x));
 });
 
-test("charging: goes home and naps under the blanket", () => {
-  const sim = new Sim({ x: 1200 }).set({ charging: true });
+test("charging: plugging in sends her home for a nap under the blanket", () => {
+  const sim = new Sim({ x: 1200 }).plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
   assert.ok(inYard(sim.x));
   assert.equal(sim.last.reason, "charging");
+});
+
+test("charging is a reaction to plugging in, not a state: one nap, then she is up again on AC", () => {
+  const sim = new Sim().set({ charging: true }).plug();
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.until((o) => o.pose === "stretch", 30 * MIN);
+  const from = sim.trace.length;
+  sim.run(3 * HOUR, 250);
+  assert.ok(!sim.trace.slice(from).some((r) => r.pose === "blanket" || r.pose === "burrow"),
+    "still plugged in, but no second nap");
 });
 
 test("music: slumps and wags in the yard, hovering first", () => {
@@ -352,14 +372,14 @@ test("music: slumps and wags in the yard, hovering first", () => {
 });
 
 test("music beats charging: she dances rather than naps", () => {
-  const sim = new Sim().set({ charging: true, music: true });
+  const sim = new Sim().set({ music: true }).plug();
   sim.run(2 * MIN, 250);
   assert.ok(!sim.trace.some((r) => r.pose === "blanket"));
   assert.ok(sim.trace.some((r) => r.pose === "slump"));
 });
 
 test("charging beats idle: reason is charging", () => {
-  const sim = new Sim().set({ charging: true, idleFor: 10 * MIN });
+  const sim = new Sim().set({ idleFor: 10 * MIN }).plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
   assert.equal(sim.last.reason, "charging");
 });
@@ -371,7 +391,7 @@ test("idle beats wander", () => {
 });
 
 test("music started while she naps wakes her first", () => {
-  const sim = new Sim().set({ charging: true });
+  const sim = new Sim().plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
   sim.set({ music: true });
   sim.run(6000);
@@ -396,6 +416,16 @@ test("notification: she stops and barks once, facing the right end", () => {
   assert.equal(sim.trace.filter((r, i, a) => r.pose === "bark" && (i === 0 || a[i - 1].pose !== "bark")).length, 1);
 });
 
+test("one notification is one bark: the two-frame pose plays once", () => {
+  const sim = new Sim({ seed: 3 });
+  sim.run(1000);
+  sim.set({ notifyAt: sim.t + 1 });
+  const from = sim.trace.length;
+  sim.run(3000, 33);
+  const barkMs = sim.trace.slice(from).filter((r) => r.pose === "bark").length * 33;
+  assert.ok(barkMs > 0 && barkMs <= 2 * Brain.FRAME_MS + 33, `barked for ${barkMs}ms`);
+});
+
 test("on a vertical bar the bark faces the top", () => {
   const sim = new Sim({ input: { axis: "v" } });
   sim.run(1000).set({ notifyAt: sim.t + 1 });
@@ -410,9 +440,9 @@ test("notification beats music", () => {
 });
 
 test("greet: coming back wriggles out, then runs along the bar, then goes home", () => {
-  const sim = new Sim().set({ charging: true });
+  const sim = new Sim().plug();
   sim.until((o) => o.pose === "blanket", 5 * MIN);
-  sim.set({ charging: false, idleFor: 0, greet: { at: sim.t + 1, awayMs: 10 * MIN } });
+  sim.set({ idleFor: 0, greet: { at: sim.t + 1, awayMs: 10 * MIN } });
   const from = sim.trace.length;
   sim.run(20_000, 100);
   const seq = distinctPoses(sim.trace.slice(from));
@@ -482,7 +512,7 @@ test("a click under the blanket gets one sleepy peek, then she is back under", (
 });
 
 test("do not disturb overrides every reaction (music, charging, idle all lose)", () => {
-  const sim = new Sim({ seed: 3 }).set({ dnd: true, music: true, charging: true, idleFor: 10 * MIN });
+  const sim = new Sim({ seed: 3 }).set({ dnd: true, music: true, charging: true, idleFor: 10 * MIN }).plug();
   sim.run(MIN, 100);
   sim.set({ notifyAt: sim.t + 1, themeChangedAt: sim.t + 1,
     greet: { at: sim.t + 1, awayMs: 10 * MIN } });
@@ -623,13 +653,13 @@ class Trip {
     this.t += dt;
     const f = Brain.followStep(this.m, {
       now: this.t, focused: this.focused, screens: SCREENS, dnd: this.dnd,
-      x: this.x, barLength: BAR, catSize: CAT,
+      x: this.x, barLength: BAR, dogSize: CAT,
     });
     this.m = f.mstate;
     if (f.switched) this.x = f.transit.side < 0 ? -CAT : BAR;
     this.screen = f.screen;
     const out = Brain.decide({
-      now: this.t, axis: "h", barLength: BAR, catSize: CAT, x: this.x, yard: YARD,
+      now: this.t, axis: "h", barLength: BAR, dogSize: CAT, x: this.x, yard: YARD,
       ...NOON, idleFor: 0, music: false, charging: false, batteryPct: 80, dnd: this.dnd,
       greet: null, notifyAt: null, themeChangedAt: null, workspaceEvent: null,
       clickedAt: null, config: {}, transit: f.transit,
@@ -744,7 +774,7 @@ test("monitors: a monitor that goes away takes her with it without a walk", () =
   trip.run(60_000);
   assert.equal(trip.screen, "DP-2");
   const f = Brain.followStep(trip.m, { now: trip.t + 100, focused: "eDP-1", screens: ["eDP-1"],
-    dnd: false, x: trip.x, barLength: BAR, catSize: CAT });
+    dnd: false, x: trip.x, barLength: BAR, dogSize: CAT });
   assert.equal(f.screen, "eDP-1");
 });
 
@@ -793,8 +823,23 @@ test("23:00-09:00 she is asleep under the blanket", () => {
   assert.ok(!awake.trace.some((r) => r.pose === "blanket"));
 });
 
-test("at 09:00 she wakes and stretches", () => {
+test("she sleeps on past 09:00 and wakes at 09:15: wake, stretch, walkies, in one go", () => {
   const sim = new Sim().at(8, 59);
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.at(9, 5).run(MIN, 250);
+  assert.equal(sim.last.pose, "blanket", "still asleep at 09:05");
+  sim.at(9, 14).run(MIN, 250);
+  assert.equal(sim.last.pose, "blanket", "still asleep at 09:14");
+  sim.at(9, 15);
+  const from = sim.trace.length;
+  sim.until((o) => o.harness, 2 * MIN);
+  const seq = distinctPoses(sim.trace.slice(from));
+  assert.ok(seq.indexOf("wriggle") >= 0 && seq.indexOf("wriggle") < seq.indexOf("stretch"), seq.join());
+  assert.ok(seq.indexOf("stretch") < seq.indexOf("walk-harness"), seq.join());
+});
+
+test("with walkies off she wakes at the end of the sleep window", () => {
+  const sim = new Sim().config({ walkies: false }).at(8, 59);
   sim.until((o) => o.pose === "blanket", 5 * MIN);
   sim.at(9, 0);
   sim.until((o) => o.pose === "wriggle");
@@ -858,7 +903,7 @@ test("no matter what happens, a settled report is always inside the yard", () =>
   const roll = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
   for (let i = 0; i < 20_000; i++) {
     if (roll() < 0.003) sim.set({ music: !sim.input.music });
-    if (roll() < 0.002) sim.set({ charging: !sim.input.charging });
+    if (roll() < 0.002) sim.set({ chargerAt: sim.t });
     if (roll() < 0.002) sim.set({ idleFor: sim.input.idleFor ? 0 : 5 * MIN });
     if (roll() < 0.002) sim.set({ notifyAt: sim.t });
     if (roll() < 0.002) sim.set({ themeChangedAt: sim.t });

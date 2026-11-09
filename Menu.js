@@ -1,17 +1,18 @@
 // The right-click menu, as data: which rows it shows and what choosing each does.
-// CatMenu.qml draws it; Valkiria.qml acts on the result. No strings live here,
+// DogMenu.qml draws it; Valkiria.qml acts on the result. No strings live here,
 // only keys into i18n/en.json.
 
 // `sleeping` is the brain's report that she is asleep (or going to bed) by
-// bedtime or the clock; `dnd` is the saved do-not-disturb setting.
+// bedtime or the clock; `dnd` is the saved do-not-disturb setting. Only the
+// do-not-disturb row is a toggle, so only it carries `toggle` and `active`.
 function items(view) {
   return [
-    { id: "walkies", labelKey: "menu.walkies", active: false },
+    { id: "walkies", labelKey: "menu.walkies" },
     view.sleeping
-      ? { id: "wake", labelKey: "menu.wake", active: false }
-      : { id: "bedtime", labelKey: "menu.bedtime", active: false },
-    { id: "treat", labelKey: "menu.treat", active: false },
-    { id: "dnd", labelKey: "menu.dnd", active: view.dnd === true },
+      ? { id: "wake", labelKey: "menu.wake" }
+      : { id: "bedtime", labelKey: "menu.bedtime" },
+    { id: "treat", labelKey: "menu.treat" },
+    { id: "dnd", labelKey: "menu.dnd", toggle: true, active: view.dnd === true },
   ]
 }
 

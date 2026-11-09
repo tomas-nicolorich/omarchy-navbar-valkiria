@@ -3,7 +3,7 @@
 
 var CELL_W = 40
 var CELL_H = 25
-var COUNT = 31
+var COUNT = 35
 // pose -> sheet frame indices, in animation order
 var POSES = {
   "bark": [
@@ -60,11 +60,17 @@ var POSES = {
     26,
     27
   ],
-  "wriggle": [
+  "walk-harness": [
     28,
-    29
+    29,
+    30,
+    31
+  ],
+  "wriggle": [
+    32,
+    33
   ],
   "yard-blanket": [
-    30
+    34
   ]
 }

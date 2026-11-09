@@ -48,8 +48,8 @@ Item {
   }
 
   // She is under the blanket (or getting under it) in this yard.
-  readonly property bool occupied: Yard.catScreen === root._screenName
-    && (Yard.catPose === "burrow" || Yard.catPose === "blanket")
+  readonly property bool occupied: Yard.dogScreen === root._screenName
+    && (Yard.dogPose === "burrow" || Yard.dogPose === "blanket")
 
   DogSprite {
     id: blanket
@@ -62,6 +62,7 @@ Item {
     pose: "yard-blanket"
     fillColor: Color.bar.text
     inkColor: Color.bar.background
+    accentColor: Color.accent
     // The blanket sits at the right end of the slot, as the brain expects.
     x: root.width - width
     y: Math.round((root.height - height) / 2)

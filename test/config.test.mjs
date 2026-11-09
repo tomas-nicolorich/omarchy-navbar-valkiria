@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const load = (file, names) =>
   new Function(`${readFileSync(join(REPO, file), "utf8")}\nreturn { ${names} };`)();
-const Config = load("Config.js", "pluginSettings");
+const Config = load("Config.js", "pluginSettings, settingsToSave");
 const Menu = load("Menu.js", "items, apply");
 
 const ID = "tomas.valkiria";
@@ -46,6 +46,31 @@ test("a bare string layout entry, a missing file and junk all give empty setting
   assert.deepEqual(Config.pluginSettings({ plugins: "no", bar: { layout: 5 } }, ID), {});
 });
 
+// ------------------------------------------------------------- saving
+
+test("a save writes the layout entry's own keys plus the change, not plugins[] keys or layout noise", () => {
+  const json = {
+    plugins: [{ id: ID, speed: 2, walkies: "08:00" }],
+    bar: { layout: { centerEnd: [{ id: ID, yardWidth: 120, dnd: false }] } },
+  };
+  assert.deepEqual(Config.settingsToSave(json, ID, { dnd: true }), { yardWidth: 120, dnd: true });
+});
+
+test("a save with no layout entry writes the plugins[] entry's own keys plus the change", () => {
+  const json = { plugins: [{ id: ID, speed: 2 }] };
+  assert.deepEqual(Config.settingsToSave(json, ID, { bedtime: "bed" }), { speed: 2, bedtime: "bed" });
+});
+
+test("a key set to null is removed, not written as null", () => {
+  const json = { bar: { layout: { centerEnd: [{ id: ID, bedtime: "up", dnd: true }] } } };
+  assert.deepEqual(Config.settingsToSave(json, ID, { bedtime: null }), { dnd: true });
+});
+
+test("a save from an empty file is just the change", () => {
+  assert.deepEqual(Config.settingsToSave({}, ID, { dnd: true }), { dnd: true });
+  assert.deepEqual(Config.settingsToSave(null, ID, { dnd: true }), { dnd: true });
+});
+
 // --------------------------------------------------------------- i18n
 
 test("every menu string is in i18n/en.json", () => {
@@ -60,7 +85,7 @@ test("every menu string is in i18n/en.json", () => {
 
 test("every Text item in the plugin's QML is plain text", () => {
   let seen = 0;
-  for (const file of ["CatMenu.qml", "Valkiria.qml", "Widget.qml"]) {
+  for (const file of ["DogMenu.qml", "Valkiria.qml", "Widget.qml"]) {
     const src = readFileSync(join(REPO, file), "utf8");
     for (const m of src.matchAll(/(^|[^A-Za-z.])Text \{/g)) {
       let depth = 1;
@@ -93,9 +118,19 @@ test("while she sleeps the bedtime row becomes Wake up", () => {
   assert.equal(rows[1].labelKey, "menu.wake");
 });
 
-test("the do not disturb row shows whether it is on", () => {
+test("the do not disturb row is the toggle and shows whether it is on", () => {
   assert.equal(Menu.items({ sleeping: false, dnd: true })[3].active, true);
   assert.equal(Menu.items({ sleeping: false, dnd: false })[3].active, false);
+  assert.equal(Menu.items({ sleeping: false, dnd: false })[3].toggle, true);
+});
+
+test("only the do not disturb row carries active or toggle", () => {
+  for (const sleeping of [true, false]) {
+    for (const row of Menu.items({ sleeping, dnd: true }).filter((r) => r.id !== "dnd")) {
+      assert.equal(row.active, undefined, row.id);
+      assert.equal(row.toggle, undefined, row.id);
+    }
+  }
 });
 
 test("choosing an item says what to save and what to command", () => {

@@ -1,6 +1,6 @@
-// The cat's right-click menu.
+// Valkiria's right-click menu.
 //
-// A full-screen transparent layer with a small card near the cat. Full-screen
+// A full-screen transparent layer with a small card near her. Full-screen
 // is what makes click-anywhere-to-dismiss work: the surface has to receive the
 // click that closes it, and a card-sized window would only ever hear clicks
 // that land on the card.
@@ -8,7 +8,7 @@
 // The window carries an input region only while it is open, so a closed menu is
 // indistinguishable from not being here at all. It never takes keyboard focus —
 // stealing focus from whatever you were typing in would be a poor trade for a
-// cat menu.
+// menu.
 
 import QtQuick
 import Quickshell
@@ -18,11 +18,11 @@ import qs.Commons
 PanelWindow {
   id: menu
 
-  // Where the cat is (for placement), and the rows to show (Menu.items).
-  property var cat: null
+  // Where she is (for placement), and the rows to show (Menu.items).
+  property var dog: null
   property var rows: []
   property bool open: false
-  // Where along the bar the cat is, so the card appears near it.
+  // Where along the bar she is, so the card appears near it.
   property real anchorPos: 0
 
   signal picked(string id)
@@ -32,8 +32,8 @@ PanelWindow {
     directory: Qt.resolvedUrl("i18n")
   }
 
-  visible: open && cat !== null
-  screen: cat ? cat.catScreen : null
+  visible: open && dog !== null
+  screen: dog ? dog.dogScreen : null
   color: "transparent"
 
   exclusionMode: ExclusionMode.Ignore
@@ -59,8 +59,8 @@ PanelWindow {
     id: card
 
     readonly property int pad: Style.space(10)
-    readonly property bool vertical: menu.cat ? menu.cat.vertical : false
-    readonly property int barSize: menu.cat ? menu.cat.barSize : 26
+    readonly property bool vertical: menu.dog ? menu.dog.vertical : false
+    readonly property int barSize: menu.dog ? menu.dog.barSize : 26
 
     color: Color.popups.background
     border.color: Color.popups.border
@@ -76,16 +76,16 @@ PanelWindow {
     width: implicitWidth
     height: implicitHeight
 
-    // Sit just clear of the bar, beside the cat, without running off screen.
+    // Sit just clear of the bar, beside her, without running off screen.
     x: vertical
       ? Math.min(menu.width - width - Style.space(8),
-          menu.cat && menu.cat.barPosition === "left" ? barSize + Style.space(6)
+          menu.dog && menu.dog.barPosition === "left" ? barSize + Style.space(6)
             : menu.width - width - barSize - Style.space(6))
       : Math.max(Style.space(8),
           Math.min(menu.width - width - Style.space(8), menu.anchorPos - width / 2))
     y: vertical
       ? Math.max(Style.space(8), Math.min(menu.height - height - Style.space(8), menu.anchorPos))
-      : (menu.cat && menu.cat.barPosition === "bottom"
+      : (menu.dog && menu.dog.barPosition === "bottom"
           ? menu.height - height - barSize - Style.space(6)
           : barSize + Style.space(6))
 
@@ -143,7 +143,7 @@ PanelWindow {
           required property var modelData
           label: strings.t(modelData.labelKey)
           active: modelData.active === true
-          toggle: modelData.id === "dnd"
+          toggle: modelData.toggle === true
           onTapped: { menu.picked(modelData.id); menu.open = false }
         }
       }

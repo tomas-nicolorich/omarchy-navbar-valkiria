@@ -24,6 +24,7 @@ Item {
   property bool mirror: false
   property color fillColor: "white"
   property color inkColor: "black"
+  // The owner binds this to a theme colour; the default is only a fallback.
   property color accentColor: "#c08040"
   property string assetDir: ""
   // Device pixels this sprite actually occupies, which decides which sheet is
@@ -40,7 +41,9 @@ Item {
   // Scaling by exactly 1:1 wants nearest-neighbour so the pixels stay hard;
   // anything else wants filtering, because fractional nearest-neighbour drops
   // and doubles rows at random.
-  readonly property bool crisp: Frames.CELL_W * scale === width
+  // Compared against device pixels, not logical width: at scale 1.25 a 32px
+  // sprite is 40 device pixels, exactly the 1x art.
+  readonly property bool crisp: Math.abs(Frames.CELL_W * scale - devicePixels) < 0.01
 
   readonly property var pattern: Frames.POSES[pose] !== undefined
     ? Frames.POSES[pose]

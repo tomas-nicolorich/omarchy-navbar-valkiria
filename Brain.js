@@ -12,13 +12,18 @@
 // settled.
 //
 // Coordinates are logical px along the bar (x for a horizontal bar, y for a
-// vertical one); `catSize` is her length along the bar.
+// vertical one); `dogSize` is her length along the bar.
 
 var WALK_PX_S = 55
 var RUN_PX_S = 150
 var ARRIVE_EPS = 2
 
-var BARK_MS = 1500
+// How long the body shows each frame of a pose (its animator interval).
+var FRAME_MS = 150
+// One bark is the two-frame pose played once through.
+var BARK_MS = 2 * FRAME_MS
+// A nap prompted by plugging in lasts this long.
+var CHARGE_NAP_MS = 10 * 60000
 var SHAKE_MS = 1500
 var PEEK_MS = 1500
 var GLANCE_MS = 1500
@@ -63,7 +68,7 @@ function freshState(seed) {
     lastPose: null,
     facing: 1,
     settled: false,
-    seen: { greet: -1, notify: -1, theme: -1, workspace: -1, click: -1, command: -1 },
+    seen: { greet: -1, notify: -1, charger: -1, theme: -1, workspace: -1, click: -1, command: -1 },
   }
 }
 
@@ -114,15 +119,15 @@ function setting(config, key) {
 // length. With no yard placed, a default slot a bit right of the middle.
 function yardSpan(input) {
   var config = input.config || {}
-  var cat = input.catSize
-  var maxX = Math.max(0, input.barLength - cat)
+  var dog = input.dogSize
+  var maxX = Math.max(0, input.barLength - dog)
   var yard = input.yard
   if (!yard) {
-    var w = Number(config.yardWidth) > 0 ? Number(config.yardWidth) : cat * 3
+    var w = Number(config.yardWidth) > 0 ? Number(config.yardWidth) : dog * 3
     yard = { x: input.barLength * 0.62 - w / 2, w: w }
   }
   var lo = clamp(yard.x, 0, maxX)
-  var hi = clamp(yard.x + yard.w - cat, lo, maxX)
+  var hi = clamp(yard.x + yard.w - dog, lo, maxX)
   return { lo: lo, hi: hi }
 }
 
@@ -163,6 +168,18 @@ function napScript(reason) {
   ], { want: "nap", reason: reason })
 }
 
+// Plugging in the charger sends her home for one nap, then she gets up. It is
+// a reaction to the plug going in, not a state: sitting on AC changes nothing.
+function chargeNapScript() {
+  return script("nap", [
+    go("walk", { f: 1 }),
+    hold("burrow", BURROW_MS),
+    hold("blanket", CHARGE_NAP_MS),
+    hold("wriggle", WRIGGLE_MS),
+    hold("stretch", STRETCH_MS),
+  ], { want: "charge", reason: "charging" })
+}
+
 // Rising from the blanket, then the play-bow.
 function wakeScript() {
   return script("wake", [hold("wriggle", WRIGGLE_MS), hold("stretch", STRETCH_MS)],
@@ -192,8 +209,8 @@ function greetScript(input, state, ctx) {
 
 // A walk away from the yard, to somewhere outside it. `dir` prefers a side.
 function tripScript(state, ctx, dir) {
-  var leftRoom = ctx.span.lo - ctx.cat
-  var rightRoom = ctx.maxX - ctx.span.hi - ctx.cat
+  var leftRoom = ctx.span.lo - ctx.dog
+  var rightRoom = ctx.maxX - ctx.span.hi - ctx.dog
   var side = 0
   if (dir > 0 && rightRoom > 0) side = 1
   else if (dir < 0 && leftRoom > 0) side = -1
@@ -202,7 +219,7 @@ function tripScript(state, ctx, dir) {
   else if (leftRoom > 0) side = -1
   if (side === 0) return null
   var target = side > 0
-    ? ctx.span.hi + ctx.cat + nextRandom(state) * rightRoom
+    ? ctx.span.hi + ctx.dog + nextRandom(state) * rightRoom
     : nextRandom(state) * leftRoom
   return script("trip", [go("walk", target)])
 }
@@ -240,7 +257,7 @@ function mealScript(state) {
 
 function context(input, state) {
   var config = input.config || {}
-  var cat = input.catSize
+  var dog = input.dogSize
   var minutes = Number(input.minutes)
   var batteryPct = input.batteryPct === undefined ? null : input.batteryPct
   var reactions = config.reactions || {}
@@ -249,8 +266,8 @@ function context(input, state) {
   var low = batteryPct !== null && batteryPct < Number(setting(config, "lowBattery"))
     && input.charging !== true
   return {
-    cat: cat,
-    maxX: Math.max(0, input.barLength - cat),
+    dog: dog,
+    maxX: Math.max(0, input.barLength - dog),
     span: yardSpan(input),
     minutes: isFinite(minutes) ? minutes : 720,
     low: low,
@@ -280,10 +297,19 @@ function walkiesDue(input, state, ctx) {
   return since >= 0 && since < WALKIES_WINDOW_MIN && !inRange(ctx.minutes, ctx.sleepRange)
 }
 
-// What she is standing by to do, by the priority order: music > charging >
-// idle, then the day's rhythm (siesta, night). Greet and notification are
-// events and are handled before this.
-function standing(input, ctx) {
+// Morning: she wakes at the walkies time, not when the sleep window ends, so
+// waking, the stretch and walkies are one sequence. True from the end of the
+// sleep window until then, on a day walkies have not happened yet.
+function sleepingInForWalkies(input, state, ctx) {
+  var at = parseClock(setting(input.config, "walkies"))
+  if (at === null || !ctx.sleepRange || state.lastWalkiesDay === input.day) return false
+  return ctx.minutes >= ctx.sleepRange.to && ctx.minutes < at
+}
+
+// What she is standing by to do, by the priority order: music > idle, then the
+// day's rhythm (siesta, night). Greet, notification and plugging in are events
+// and are handled before this.
+function standing(input, ctx, state) {
   var idleFor = Number(input.idleFor) || 0
   var config = input.config || {}
   if (ctx.dnd) return { want: "nap", reason: "dnd" }
@@ -291,7 +317,6 @@ function standing(input, ctx) {
   // keeps her up through the night until the sleep window has passed.
   if (input.bedtime === "bed") return { want: "nap", reason: "bedtime" }
   if (ctx.react("music") && input.music === true) return { want: "music" }
-  if (ctx.react("charging") && input.charging === true) return { want: "nap", reason: "charging" }
   if (ctx.react("idle") && idleFor >= Number(setting(config, "idleBurrowAfter")) * 1000) {
     return { want: "nap", reason: "idle" }
   }
@@ -299,8 +324,12 @@ function standing(input, ctx) {
       && idleFor >= Number(setting(config, "siestaBurrowAfter")) * 1000) {
     return { want: "nap", reason: "siesta" }
   }
-  if (inRange(ctx.minutes, ctx.sleepRange) && input.bedtime !== "up") {
-    return { want: "nap", reason: "night" }
+  if (input.bedtime !== "up") {
+    if (inRange(ctx.minutes, ctx.sleepRange)) return { want: "nap", reason: "night" }
+    var act = state.act
+    if (act && act.kind === "nap" && act.reason === "night" && sleepingInForWalkies(input, state, ctx)) {
+      return { want: "nap", reason: "night" }
+    }
   }
   return { want: "free" }
 }
@@ -324,6 +353,15 @@ function takeEvents(input, state, ctx) {
   }
 
   var busyGreeting = state.act && state.act.kind === "greet"
+
+  if (input.chargerAt !== null && input.chargerAt !== undefined && input.chargerAt > seen.charger) {
+    seen.charger = input.chargerAt
+    var napping = state.act && state.act.kind === "nap"
+    if (ctx.react("charging") && !busyGreeting && !napping) {
+      state.act = chargeNapScript()
+      state.beat = null
+    }
+  }
 
   if (input.notifyAt !== null && input.notifyAt !== undefined && input.notifyAt > seen.notify) {
     seen.notify = input.notifyAt
@@ -392,6 +430,9 @@ function reconcile(state, standingNow) {
   if (!act) return
   if (act.want === "any" || act.want === "greet" || act.want === "none") return
   var want = standingNow.want
+  // A plug-in nap runs its course unless music, do not disturb or the like
+  // asks for something else.
+  if (act.want === "charge" && (want === "free" || want === "nap")) return
   if (act.want === want) {
     if (want === "nap") act.reason = standingNow.reason
     return
@@ -479,11 +520,11 @@ function beatStep(beat, now) {
 // (leaving right, she arrives from the left, as if the screens sit side by side).
 //
 // `mstate` is carried between calls (pass null the first time). Input:
-// { now, focused, screens: [names], dnd, x, barLength, catSize }. Returns
+// { now, focused, screens: [names], dnd, x, barLength, dogSize }. Returns
 // { mstate, screen, transit, switched }: `screen` is the monitor she is drawn
 // on; `transit` is null or { phase: "leave"|"enter", side: -1|1 } for decide();
 // `switched` is true on the one call where the screen changes mid-walk and the
-// body must put her at the entry edge (x = -catSize for side -1, barLength for 1).
+// body must put her at the entry edge (x = -dogSize for side -1, barLength for 1).
 
 var FOLLOW_DEBOUNCE_MS = 3000
 
@@ -498,7 +539,7 @@ function followStep(prev, input) {
   var screens = input.screens || []
   var known = function (name) { return screens.indexOf(name) !== -1 }
   var focused = known(input.focused) ? input.focused : null
-  var maxX = Math.max(0, input.barLength - input.catSize)
+  var maxX = Math.max(0, input.barLength - input.dogSize)
   var switched = false
 
   // First sight, or the monitor she was on has been unplugged: no walk.
@@ -530,7 +571,7 @@ function followStep(prev, input) {
       m.to = null
     } else {
       m.to = focused
-      var gone = m.side < 0 ? input.x <= -input.catSize + ARRIVE_EPS : input.x >= input.barLength - ARRIVE_EPS
+      var gone = m.side < 0 ? input.x <= -input.dogSize + ARRIVE_EPS : input.x >= input.barLength - ARRIVE_EPS
       if (gone) {
         m.screen = m.to
         m.to = null
@@ -553,7 +594,7 @@ function followStep(prev, input) {
 function transitDecision(input, state, ctx) {
   var t = input.transit
   var target
-  if (t.phase === "leave") target = t.side < 0 ? -input.catSize : input.barLength
+  if (t.phase === "leave") target = t.side < 0 ? -input.dogSize : input.barLength
   else target = t.side < 0 ? ctx.span.lo : ctx.span.hi
   state.act = null
   state.beat = null
@@ -570,7 +611,7 @@ function decide(input, state) {
   var dt = state.lastNow === null ? 0 : Math.max(0, now - state.lastNow)
   state.lastNow = now
   var speedScale = ctx.low ? 0.5 : 1
-  var standingNow = standing(input, ctx)
+  var standingNow = standing(input, ctx, state)
   ctx.sleeping = standingNow.want === "nap"
     && (standingNow.reason === "bedtime" || standingNow.reason === "night")
   ctx.clearBedtime = input.bedtime === "up" && !inRange(ctx.minutes, ctx.sleepRange)
@@ -615,6 +656,8 @@ function decide(input, state) {
   var act = state.act
   var facing = state.facing
   var pose = r.step.pose
+  // Morning walkies are drawn with the red harness (its own walk frames).
+  if (act.harness && pose === "walk") pose = "walk-harness"
   var gait = "idle"
   if (r.moving) {
     gait = r.step.gait
