@@ -12,7 +12,32 @@ Two parts, one plugin (`tomas.valkiria`):
 
 Place the yard with `omarchy bar move tomas.valkiria --section centerEnd`.
 
-Sprites are not drawn yet; placeholder art comes with the sprite pipeline.
+## Drawing Valkiria
+
+The art in `art/` is placeholder: blocky dachshund silhouettes, correctly
+sized. Replace any file with a real drawing and rebuild:
+
+```
+tools/build-sprites.py     # needs rsvg-convert and ImageMagick
+omarchy restart shell
+```
+
+The contract for a frame:
+
+- One file per frame, `art/<pose>-<n>.svg`, numbered from 1 (`walk-1.svg` ...
+  `walk-4.svg`), plus `art/yard-blanket.svg`. The poses and their frame counts
+  are in `docs/specs/2026-11-09-valkiria-design.md`.
+- `viewBox="0 0 40 25"`, one unit per art pixel, everything snapped to whole
+  units (use `shape-rendering="crispEdges"`).
+- Three top-level groups with ids `fill`, `ink` and `accent`. Colour inside
+  them doesn't matter, only alpha does: the plugin tints each layer from the
+  bar's colours. `fill` covers the whole silhouette; `ink` and `accent` are
+  painted on top of it, so don't cut holes in `fill` for them.
+- She faces right (the sprite mirrors itself for left). Her feet sit on row 22
+  (the bottom edge of the feet at y=23) so poses don't jump.
+
+The build writes `assets/valkiria-{1x,2x}-{fill,ink,accent}.png` and
+regenerates `Frames.js` (pose to frame indices). Both are committed.
 
 ## Tests
 
