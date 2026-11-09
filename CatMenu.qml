@@ -18,13 +18,19 @@ import qs.Commons
 PanelWindow {
   id: menu
 
-  // Current values to display, and where to send changes.
+  // Where the cat is (for placement), and the rows to show (Menu.items).
   property var cat: null
+  property var rows: []
   property bool open: false
   // Where along the bar the cat is, so the card appears near it.
   property real anchorPos: 0
 
-  signal chose(string key, var value)
+  signal picked(string id)
+
+  Translations {
+    id: strings
+    directory: Qt.resolvedUrl("i18n")
+  }
 
   visible: open && cat !== null
   screen: cat ? cat.catScreen : null
@@ -60,6 +66,11 @@ PanelWindow {
     border.color: Color.popups.border
     border.width: 1
     radius: Style.cornerRadius
+    // Fades in; with animations off (Style.duration is 0) it just appears.
+    opacity: menu.open ? 1 : 0
+    Behavior on opacity {
+      NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+    }
     implicitWidth: column.implicitWidth + pad * 2
     implicitHeight: column.implicitHeight + pad * 2
     width: implicitWidth
@@ -85,7 +96,8 @@ PanelWindow {
       spacing: Style.space(2)
 
       Text {
-        text: "Valkiria"
+        text: strings.t("menu.title", "Valkiria")
+        textFormat: Text.PlainText
         color: Color.popups.text
         opacity: 0.55
         font.family: Style.fontFamily
@@ -93,12 +105,13 @@ PanelWindow {
         bottomPadding: Style.space(4)
       }
 
-      // One tappable row. `chip` rows sit side by side; the rest are full width.
-      component Row: Rectangle {
+      // One tappable row.
+      component MenuRow: Rectangle {
         id: row
         property string label: ""
         property bool active: false
-        property bool dim: false
+        // Only the on/off row wears a marker.
+        property bool toggle: false
 
         implicitWidth: Math.max(rowText.implicitWidth + Style.space(20), Style.space(150))
         implicitHeight: rowText.implicitHeight + Style.space(9)
@@ -111,7 +124,8 @@ PanelWindow {
           id: rowText
           x: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
-          text: (row.active ? "● " : "○ ") + row.label
+          text: (row.toggle ? (row.active ? "● " : "○ ") : "") + row.label
+          textFormat: Text.PlainText
           color: Color.popups.text
           opacity: row.active ? 1.0 : 0.7
           font.family: Style.fontFamily
@@ -123,10 +137,15 @@ PanelWindow {
         signal tapped()
       }
 
-      // The menu's remaining items arrive with ticket 005.
-      Row {
-        label: "pettable"; active: menu.cat && menu.cat.pettable
-        onTapped: { menu.chose("pettable", !(menu.cat && menu.cat.pettable)); menu.open = false }
+      Repeater {
+        model: menu.rows
+        MenuRow {
+          required property var modelData
+          label: strings.t(modelData.labelKey)
+          active: modelData.active === true
+          toggle: modelData.id === "dnd"
+          onTapped: { menu.picked(modelData.id); menu.open = false }
+        }
       }
     }
   }

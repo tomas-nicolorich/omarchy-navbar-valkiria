@@ -46,6 +46,38 @@ test("a bare string layout entry, a missing file and junk all give empty setting
   assert.deepEqual(Config.pluginSettings({ plugins: "no", bar: { layout: 5 } }, ID), {});
 });
 
+// --------------------------------------------------------------- i18n
+
+test("every menu string is in i18n/en.json", () => {
+  const en = JSON.parse(readFileSync(join(REPO, "i18n/en.json"), "utf8"));
+  for (const sleeping of [true, false]) {
+    for (const row of Menu.items({ sleeping, dnd: false })) {
+      assert.equal(typeof en[row.labelKey], "string", row.labelKey);
+    }
+  }
+  assert.equal(typeof en["menu.title"], "string");
+});
+
+test("every Text item in the plugin's QML is plain text", () => {
+  let seen = 0;
+  for (const file of ["CatMenu.qml", "Valkiria.qml", "Widget.qml"]) {
+    const src = readFileSync(join(REPO, file), "utf8");
+    for (const m of src.matchAll(/(^|[^A-Za-z.])Text \{/g)) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      const start = i;
+      while (depth > 0 && i < src.length) {
+        if (src[i] === "{") depth++;
+        else if (src[i] === "}") depth--;
+        i++;
+      }
+      seen++;
+      assert.match(src.slice(start, i), /textFormat: Text\.PlainText/, `${file}: Text without textFormat`);
+    }
+  }
+  assert.ok(seen > 0);
+});
+
 // --------------------------------------------------------------- menu
 
 test("the menu offers walkies, bedtime, treat and do not disturb", () => {

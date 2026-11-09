@@ -23,6 +23,15 @@ QtObject {
     xs = next
   }
 
+  // Where she is and what she is doing, so each yard can show its folded
+  // blanket unless she is under it.
+  property string catScreen: ""
+  property string catPose: ""
+  function cat(screenName, pose) {
+    if (catScreen !== screenName) catScreen = screenName
+    if (catPose !== pose) catPose = pose
+  }
+
   function clear(name) {
     if (xs[name] === undefined) return
     var next = ({})

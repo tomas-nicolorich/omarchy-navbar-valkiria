@@ -19,6 +19,8 @@ import Quickshell.Services.Mpris
 import Quickshell.Services.UPower
 import qs.Commons
 import "Brain.js" as Brain
+import "Config.js" as Config
+import "Menu.js" as Menu
 
 Item {
   id: root
@@ -41,18 +43,19 @@ Item {
 
   // ---------------------------------------------------------------- config
 
-  // Settings live inline on this plugin's entry in shell.json's `plugins[]`,
-  // per the shell's storage rules. A third-party plugin gets a scoped `shell`
-  // with no `shellConfig`, so the file is read directly and watched.
+  // Settings live inline in shell.json: on this plugin's `plugins[]` entry, or
+  // on its bar-layout entry when the yard widget is placed (the shell's
+  // updateEntryInline saves to the layout entry in that case, so both are
+  // read: Config.js). A third-party plugin gets a scoped `shell` with no
+  // `shellConfig`, so the file is read directly and watched.
   property var shellJson: ({})
+  // Saves not yet seen in the file, laid over it so a menu choice takes effect
+  // at once. Dropped whenever the file is read, which is then the truth.
+  property var overrides: ({})
   readonly property var config: {
-    var settings = shellJson ? shellJson.plugins : null
-    if (Array.isArray(settings)) {
-      for (var i = 0; i < settings.length; i++) {
-        if (settings[i] && String(settings[i].id || "") === root.pluginId) return settings[i]
-      }
-    }
-    return ({})
+    var merged = Config.pluginSettings(shellJson, root.pluginId)
+    for (var key in overrides) merged[key] = overrides[key]
+    return merged
   }
 
   FileView {
@@ -62,6 +65,8 @@ Item {
     onFileChanged: reload()
     onLoaded: {
       try { root.shellJson = JSON.parse(text()) } catch (e) { root.shellJson = ({}) }
+      root.overrides = ({})
+      root.nudge()
     }
   }
 
@@ -69,8 +74,14 @@ Item {
   readonly property bool pettable: config.pettable !== false
   readonly property var reactions: config.reactions && typeof config.reactions === "object"
     ? config.reactions : ({})
-  // Do not disturb (the menu in ticket 005 writes it).
+  // Do not disturb, and the Bedtime / Wake up override ("bed", "up" or unset):
+  // both are saved by the menu.
   readonly property bool dnd: config.dnd === true
+  readonly property string bedtime: config.bedtime ? String(config.bedtime) : ""
+  // The brain's word on whether she is asleep, for the menu's Bedtime / Wake up.
+  property bool sleeping: false
+  // A one-off menu command (walkies, treat) for the brain.
+  property var command: null
   // Her length along the bar, in logical px: the art is 40x25 art px drawn at
   // 32x20 logical px (1 art px = 0.8 logical px, 1:1 device px at scale 1.25).
   readonly property int catSize: Number(config.size) > 0 ? Number(config.size) : 32
@@ -92,7 +103,9 @@ Item {
   // ------------------------------------------------------------- monitors
 
   // One cat, on the output Hyprland has focused, so it follows you between
-  // screens rather than multiplying.
+  // screens rather than multiplying. Not at once: Brain.followStep waits for
+  // focus to settle, then walks her off one bar and onto the other, and says
+  // which screen she is on (shownScreenName) meanwhile.
   readonly property string pinnedMonitor: {
     var wanted = String(config.monitor || "focused")
     return wanted === "focused" ? "" : wanted
@@ -102,14 +115,23 @@ Item {
     var monitor = Hyprland.focusedMonitor
     return monitor ? String(monitor.name || "") : ""
   }
+  readonly property var screenNames: {
+    var names = []
+    var screens = Quickshell.screens
+    for (var i = 0; screens && i < screens.length; i++) names.push(String(screens[i].name))
+    return names
+  }
+  property string shownScreenName: ""
+  property var followState: null
   readonly property var catScreen: {
     var screens = Quickshell.screens
     if (!screens || screens.length === 0) return null
     for (var i = 0; i < screens.length; i++) {
-      if (String(screens[i].name) === root.wantedScreenName) return screens[i]
+      if (String(screens[i].name) === root.shownScreenName) return screens[i]
     }
     return screens[0]
   }
+  onWantedScreenNameChanged: nudge()
 
   // --------------------------------------------------------- world inputs
 
@@ -278,18 +300,40 @@ Item {
     // walk cycle looking drawn rather than frantic.
     interval: 150
     repeat: true
-    running: ticker.running
+    // With animations off (`omarchy toggle animations`) she holds one frame
+    // per pose rather than cycling.
+    running: ticker.running && root.motion
     onTriggered: root.animTick = (root.animTick + 1) & 0xff
   }
 
   property bool _placed: false
 
+  // Motion follows the shell's animation switch: Style.duration(ms) is 0 with
+  // animations off, in which case she moves between spots without the walk.
+  readonly property bool motion: Style.duration(1000) > 0
+
   function step() {
+    if (screenNames.length === 0) return
+
+    // Which monitor she is on, and whether she is crossing between two.
+    var follow = Brain.followStep(followState, {
+      now: Date.now(), focused: wantedScreenName, screens: screenNames, dnd: dnd,
+      x: catPos, barLength: barLength, catSize: alongSize,
+    })
+    followState = follow.mstate
+    if (follow.screen !== null && follow.screen !== shownScreenName) shownScreenName = follow.screen
+    // Property bindings (catScreen, barLength) have caught up by now, so a
+    // hand-over puts her at the entry edge of the new bar.
+    if (follow.switched) catPos = follow.transit.side < 0 ? -alongSize : barLength
+
     if (!catScreen || barLength <= 0) return
 
     var now = Date.now()
     var date = new Date(now)
     var maxPos = Math.max(0, barLength - alongSize)
+    // Off the end of a bar is only allowed on the way between two.
+    var minPos = follow.transit ? -alongSize : 0
+    var limitPos = follow.transit ? barLength : maxPos
 
     // She starts the session at home in the yard.
     if (!_placed) {
@@ -313,6 +357,9 @@ Item {
       charging: charging,
       batteryPct: batteryPct,
       dnd: dnd,
+      bedtime: bedtime,
+      command: command,
+      transit: follow.transit,
       greet: greet,
       notifyAt: notifyAt >= 0 ? notifyAt : null,
       themeChangedAt: themeChangedAt >= 0 ? themeChangedAt : null,
@@ -331,15 +378,18 @@ Item {
     if (pixelsPerSecond > 0) {
       var stepSize = pixelsPerSecond * decision.speedScale * speed * (tickMs / 1000)
       var delta = decision.target - catPos
-      catPos = Math.abs(delta) <= stepSize
+      catPos = (Math.abs(delta) <= stepSize || !motion)
         ? decision.target
         : catPos + (delta > 0 ? stepSize : -stepSize)
     }
-    catPos = Math.max(0, Math.min(maxPos, catPos))
+    catPos = Math.max(minPos, Math.min(limitPos, catPos))
 
     catPose = decision.pose
     catFacing = decision.facing
     catSettled = decision.pettable
+    sleeping = decision.sleeping
+    if (decision.clearBedtime && bedtime === "up") setSettings({ bedtime: null })
+    Yard.cat(String(catScreen.name), decision.pose)
 
     ticker.interval = decision.wakeIn > tickMs ? decision.wakeIn : tickMs
   }
@@ -361,17 +411,32 @@ Item {
   // own entry in shell.json, only when you pick something, and it goes through
   // the shell's scoped API (a third-party panel has no mutateShellConfig).
   // updateEntryInline replaces the entry's settings, so merge into a copy.
-  function setSetting(key, value) {
-    if (!shell || typeof shell.updateEntryInline !== "function") return
+  function setSettings(patch) {
     var next = JSON.parse(JSON.stringify(root.config))
-    next[key] = value
+    var shown = JSON.parse(JSON.stringify(root.overrides))
+    for (var key in patch) {
+      next[key] = patch[key]
+      shown[key] = patch[key]
+    }
+    // Show it now; the file watcher replaces this with what was really saved.
+    root.overrides = shown
+    nudge()
+    if (!shell || typeof shell.updateEntryInline !== "function") return
     shell.updateEntryInline(root.pluginId, next)
   }
 
   CatMenu {
     id: catMenu
     cat: root
-    onChose: function (key, value) { root.setSetting(key, value) }
+    rows: Menu.items({ sleeping: root.sleeping, dnd: root.dnd })
+    onPicked: function (id) {
+      var result = Menu.apply(id, root.config, Date.now())
+      if (result.patch) root.setSettings(result.patch)
+      if (result.command) {
+        root.command = result.command
+        root.nudge()
+      }
+    }
   }
 
 
