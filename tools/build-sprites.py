@@ -46,7 +46,9 @@ def render(svg, layer, scale, dest):
     """Render one layer of one frame; the other groups are hidden by CSS."""
     hidden = ",".join(f"#{l}" for l in LAYERS if l != layer)
     with tempfile.NamedTemporaryFile("w", suffix=".css") as css:
-        css.write(f"{hidden}{{display:none}}\n")
+        # Sheets are white: MultiEffect colorization scales the tint by the
+        # pixel's luminance, so a black mask stays black whatever the tint.
+        css.write(f"{hidden}{{display:none}}\nrect{{fill:#fff}}\n")
         css.flush()
         subprocess.run(
             ["rsvg-convert", "-w", str(CELL_W * scale), "-h", str(CELL_H * scale),
