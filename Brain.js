@@ -14,12 +14,12 @@
 // Coordinates are logical px along the bar (x for a horizontal bar, y for a
 // vertical one); `dogSize` is her length along the bar.
 
-var WALK_PX_S = 55
-var RUN_PX_S = 150
+var WALK_PX_S = 41
+var RUN_PX_S = 112
 var ARRIVE_EPS = 2
 
 // How long the body shows each frame of a pose (its animator interval).
-var FRAME_MS = 150
+var FRAME_MS = 200
 // One bark is the two-frame pose played once through.
 var BARK_MS = 2 * FRAME_MS
 // A nap prompted by plugging in lasts this long.

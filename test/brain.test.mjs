@@ -444,7 +444,7 @@ test("greet: coming back wriggles out, then runs along the bar, then goes home",
   sim.until((o) => o.pose === "blanket", 5 * MIN);
   sim.set({ idleFor: 0, greet: { at: sim.t + 1, awayMs: 10 * MIN } });
   const from = sim.trace.length;
-  sim.run(20_000, 100);
+  sim.run(30_000, 100);
   const seq = distinctPoses(sim.trace.slice(from));
   assert.equal(seq[0], "wriggle");
   assert.ok(seq.indexOf("wriggle") < seq.indexOf("run"), seq.join());
