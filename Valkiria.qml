@@ -253,7 +253,35 @@ Item {
   readonly property var yardRecord: dogScreen ? Yard.xs[String(dogScreen.name)] : undefined
   readonly property var yardForBrain: yardRecord ? { x: yardRecord.x, w: yardRecord.w } : null
 
-  readonly property bool maskActive: dogSettled && root.pettable && !root.barHidden
+  // Whether a real fullscreen window (Hyprland mode 2, not maximize) is showing
+  // on the monitor she is on, on its workspace or on a special workspace shown
+  // over it. The screensaver is one: a fullscreen terminal on
+  // special:screensaver-<monitor>. The bar sits on the Top layer, which
+  // fullscreen covers; she sits on Overlay, which it does not, so she has to
+  // step aside herself. Hyprland's toplevel and monitor lists do not follow
+  // these changes on their own; the Connections below refresh them.
+  readonly property bool underFullscreen: {
+    var monitor = dogScreen ? Hyprland.monitorFor(dogScreen) : null
+    if (!monitor) return false
+    var ids = []
+    if (monitor.activeWorkspace) ids.push(Number(monitor.activeWorkspace.id))
+    var ipc = monitor.lastIpcObject
+    var special = ipc && ipc.specialWorkspace ? Number(ipc.specialWorkspace.id) : 0
+    if (special !== 0) ids.push(special)
+    var list = Hyprland.toplevels.values
+    for (var i = 0; i < list.length; i++) {
+      var toplevel = list[i]
+      if (!toplevel || !toplevel.workspace) continue
+      if (ids.indexOf(Number(toplevel.workspace.id)) === -1) continue
+      var t = toplevel.lastIpcObject
+      if (t && (Number(t.fullscreen) & 2) !== 0) return true
+    }
+    return false
+  }
+
+  readonly property bool hidden: barHidden || underFullscreen
+
+  readonly property bool maskActive: dogSettled && root.pettable && !root.hidden
 
   // ------------------------------------------------------- event sources
 
@@ -271,6 +299,21 @@ Item {
     }
   }
   property int _lastWorkspaceId: -1
+
+  // Keep the lists underFullscreen reads current.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = event ? String(event.name) : ""
+      if (name === "activespecial" || name === "activespecialv2") {
+        Hyprland.refreshMonitors()
+        Hyprland.refreshToplevels()
+      } else if (name === "fullscreen" || name === "openwindow" || name === "closewindow"
+          || name === "movewindow" || name === "movewindowv2") {
+        Hyprland.refreshToplevels()
+      }
+    }
+  }
 
   onMusicPlayingChanged: nudge()
   onChargingChanged: nudge()
@@ -451,7 +494,7 @@ Item {
     id: window
 
     screen: root.dogScreen
-    visible: root.dogScreen !== null && !root.barHidden
+    visible: root.dogScreen !== null && !root.hidden
     color: "transparent"
 
     exclusionMode: ExclusionMode.Ignore
