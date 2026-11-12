@@ -2,8 +2,7 @@ pragma Singleton
 
 // The channel between the yard bar-widget and the overlay panel. Both entry
 // points of this plugin load in one QML engine, so this plugin-local singleton
-// is one shared instance (docs/tickets/001-yard-position-spike.md). Needs the
-// `qmldir` next to it to be registered.
+// is one shared instance. Needs the `qmldir` next to it to be registered.
 
 import QtQuick
 

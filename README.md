@@ -85,8 +85,8 @@ The grids in `art/grids/` are the composed frames, one file each.
 
 - Frames are named `<pose>-<n>`, numbered 1..n with no gaps
   (`walk-1` ... `walk-4`), plus `yard-blanket`. Add a frame by adding the
-  next number to `frames.json`; the build picks it up. The poses and their
-  frame counts are in `docs/specs/2026-11-09-valkiria-design.md`.
+  next number to `frames.json`; the build picks it up. The poses and the
+  frames each one plays are listed in `Frames.js`.
 - The red harness is drawn in ink. Morning walkies use `walk-harness-1` ...
   `walk-harness-4`: the `walk-<n>` parts plus the `harness` part.
 
