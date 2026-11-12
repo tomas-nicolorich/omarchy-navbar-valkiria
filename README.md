@@ -1,7 +1,19 @@
 # Valkiria
 
 An [Omarchy](https://omarchy.org) shell plugin: a black-and-tan miniature
-dachshund that roams the bar and its yard. Early work in progress.
+dachshund that roams the bar and its yard.
+
+![Valkiria walking, sniffing, sitting, wagging and napping under her blanket](preview.png)
+
+## Install
+
+```
+omarchy plugin add https://github.com/tomas-nicolorich/navbar-valkiria --enable
+```
+
+Remove it with `omarchy plugin remove tomas.valkiria`.
+
+## How it works
 
 Two parts, one plugin (`tomas.valkiria`):
 
@@ -10,7 +22,8 @@ Two parts, one plugin (`tomas.valkiria`):
 - a bar widget (`Widget.qml`), the yard, which reserves a slot in the bar and
   tells the overlay where it is through a plugin-local singleton (`Yard.qml`).
 
-Place the yard with `omarchy bar move tomas.valkiria --section centerEnd`.
+The yard sits at the end of the bar's centre section by default. Move it with
+`omarchy bar move tomas.valkiria --section <section>`.
 
 ## Drawing Valkiria
 
@@ -88,7 +101,7 @@ node --test test/
 
 ## Credit
 
-Valkiria is a fork of [navbar-cat](https://github.com/tallsam/navbar-cat) by
+Valkiria is a fork of [navbar-cat](https://github.com/yeehahboogie/omarchy-navbar-cat) by
 tallsam (MIT). The behaviour core and the overlay structure come from it; the
 pounce, cursor chasing, character picker and oneko artwork have been removed.
 See `LICENSE`.

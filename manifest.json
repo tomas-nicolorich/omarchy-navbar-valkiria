@@ -18,6 +18,7 @@
   "barWidget": {
     "displayName": "Valkiria Yard",
     "category": "Plugin",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "centerEnd"
   }
 }
