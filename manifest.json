@@ -19,6 +19,6 @@
     "displayName": "Valkiria Yard",
     "category": "Plugin",
     "allowMultiple": false,
-    "defaultSection": "centerEnd"
+    "defaultSection": "center"
   }
 }
