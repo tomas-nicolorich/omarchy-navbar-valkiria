@@ -8,7 +8,7 @@ dachshund that roams the bar and its yard.
 ## Install
 
 ```
-omarchy plugin add https://github.com/tomas-nicolorich/navbar-valkiria --enable
+omarchy plugin add https://github.com/tomas-nicolorich/omarchy-navbar-valkiria --enable
 ```
 
 Remove it with `omarchy plugin remove tomas.valkiria`.
