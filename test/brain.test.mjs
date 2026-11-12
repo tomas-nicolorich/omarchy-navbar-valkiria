@@ -600,14 +600,27 @@ test("Walkies now from under the blanket: she wriggles out first", () => {
   sim.until((o) => o.gait === "walk" && o.harness, MIN);
 });
 
-test("Treat: a happy wiggle and wag, then back to normal", () => {
+test("Treat: she sits for it and wags, then back to normal", () => {
   const sim = new Sim({ seed: 6 });
-  sim.until((o) => o.settled && o.pose !== "wag" && o.pose !== "wriggle");
+  sim.until((o) => o.settled && o.pose !== "wag" && o.pose !== "sit");
   sim.set({ command: { at: sim.t + 1, kind: "treat" } });
-  assert.equal(sim.tick().pose, "wriggle");
+  const from = sim.trace.length;
+  assert.equal(sim.tick().pose, "sit");
   sim.until((o) => o.pose === "wag", 5000);
+  assert.ok(!sim.trace.slice(from).some((r) => r.pose === "wriggle"), "no blanket wriggle when awake");
   sim.run(10_000);
   assert.notEqual(sim.last.reason, "treat");
+});
+
+test("Treat under the blanket: she wriggles out first, then sits and wags", () => {
+  const sim = new Sim({ seed: 6 }).set({ bedtime: "bed" });
+  sim.until((o) => o.pose === "blanket", 5 * MIN);
+  sim.set({ command: { at: sim.t + 1, kind: "treat" } });
+  const from = sim.trace.length;
+  assert.equal(sim.tick().pose, "wriggle");
+  sim.until((o) => o.pose === "wag", 10_000);
+  const seq = distinctPoses(sim.trace.slice(from));
+  assert.deepEqual(seq, ["wriggle", "sit", "wag"]);
 });
 
 test("a command is consumed once", () => {

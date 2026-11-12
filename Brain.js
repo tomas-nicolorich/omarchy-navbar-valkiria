@@ -32,7 +32,7 @@ var WRIGGLE_MS = 1200
 var STRETCH_MS = 2000
 var CLICK_WAG_MS = 2500
 var CLICK_HOVER_MS = 2000
-var TREAT_WIGGLE_MS = 1200
+var TREAT_SIT_MS = 1500
 var TREAT_WAG_MS = 3000
 // Chance that a workspace switch also sends her on a walk.
 var WORKSPACE_WALK_P = 0.35
@@ -403,8 +403,11 @@ function takeEvents(input, state, ctx) {
         state.act = walk
         state.beat = null
       } else if (cmd.kind === "treat") {
-        state.act = script("treat", [hold("wriggle", TREAT_WIGGLE_MS), hold("wag", TREAT_WAG_MS)],
+        // She sits for it, then wags; under the blanket she wriggles out first.
+        var treat = script("treat", [hold("sit", TREAT_SIT_MS), hold("wag", TREAT_WAG_MS)],
           { want: "any" })
+        if (underBlanket(state.act)) treat.steps.unshift(hold("wriggle", WRIGGLE_MS))
+        state.act = treat
         state.beat = null
       }
     }
