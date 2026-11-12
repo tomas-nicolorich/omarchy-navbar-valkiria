@@ -22,7 +22,7 @@ Two parts, one plugin (`tomas.valkiria`):
 - a bar widget (`Widget.qml`), the yard, which reserves a slot in the bar and
   tells the overlay where it is through a plugin-local singleton (`Yard.qml`).
 
-The yard sits at the end of the bar's centre section by default. Move it with
+The yard sits in the bar's centre section by default. Move it with
 `omarchy bar move tomas.valkiria --section <section>`.
 
 ## Drawing Valkiria
