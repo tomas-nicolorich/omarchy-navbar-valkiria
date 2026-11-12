@@ -54,7 +54,7 @@ test("frame indices are distinct and fill the sheet exactly", () => {
 });
 
 for (const [scale, tag] of [[1, "1x"], [2, "2x"]]) {
-  for (const layer of ["fill", "ink", "accent"]) {
+  for (const layer of ["fill", "shade", "ink", "accent"]) {
     test(`${tag} ${layer} sheet exists and is COUNT cells wide`, () => {
       const p = join(REPO, "assets", `valkiria-${tag}-${layer}.png`);
       assert.ok(existsSync(p), `${p} missing`);
@@ -70,7 +70,7 @@ test("every SVG follows the art contract", () => {
   for (const f of readdirSync(join(REPO, "art")).filter((f) => f.endsWith(".svg"))) {
     const s = readFileSync(join(REPO, "art", f), "utf8");
     assert.match(s, /viewBox="0 0 40 25"/, f);
-    for (const id of ["fill", "ink", "accent"]) {
+    for (const id of ["fill", "shade", "ink", "accent"]) {
       assert.match(s, new RegExp(`<g id="${id}"`), `${f} lacks #${id}`);
     }
   }
@@ -82,6 +82,7 @@ test("the harness walk differs from the plain walk in the ink layer only", () =>
     const plain = readFileSync(join(REPO, "art", `walk-${i}.svg`), "utf8");
     const harness = readFileSync(join(REPO, "art", `walk-harness-${i}.svg`), "utf8");
     assert.equal(layer(harness, "fill"), layer(plain, "fill"));
+    assert.equal(layer(harness, "shade"), layer(plain, "shade"));
     assert.equal(layer(harness, "accent"), layer(plain, "accent"));
     assert.notEqual(layer(harness, "ink"), layer(plain, "ink"));
   }

@@ -1,0 +1,306 @@
+{
+  "bark-1": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head-bark", "x": 24, "y": 4},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "bark-2": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "blanket-1": [
+    {"part": "blanket-lump-low", "x": 3, "y": 15},
+    {"part": "head-rest", "x": 29, "y": 17}
+  ],
+  "blanket-2": [
+    {"part": "blanket-lump-high", "x": 3, "y": 14},
+    {"part": "head-rest", "x": 29, "y": 17}
+  ],
+  "burrow-1": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-up", "x": 0, "y": 5},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "blanket-burrow-a", "x": 12, "y": 8}
+  ],
+  "burrow-2": [
+    {"part": "tail-peek", "x": 0, "y": 19},
+    {"part": "blanket-burrow-b", "x": 5, "y": 12},
+    {"part": "nose-peek", "x": 35, "y": 21}
+  ],
+  "dig-1": [
+    {"part": "front-back", "x": 21, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-up", "x": 0, "y": 5},
+    {"part": "body-low", "x": 7, "y": 10},
+    {"part": "head-down", "x": 27, "y": 12},
+    {"part": "front-fwd", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar-low", "x": 27, "y": 12},
+    {"part": "dirt-a", "x": 0, "y": 20}
+  ],
+  "dig-2": [
+    {"part": "front-fwd", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-up2", "x": 2, "y": 5},
+    {"part": "body-low", "x": 7, "y": 10},
+    {"part": "head-down", "x": 27, "y": 12},
+    {"part": "front-back", "x": 24, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar-low", "x": 27, "y": 12},
+    {"part": "dirt-b", "x": -1, "y": 21}
+  ],
+  "hover-1": [
+    {"part": "hover", "x": 5, "y": 10},
+    {"part": "tail-hang", "x": 2, "y": 16},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "hover-2": [
+    {"part": "hover", "x": 5, "y": 10},
+    {"part": "tail-hang2", "x": 0, "y": 16},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "run-1": [
+    {"part": "run-hind-far-1", "x": 5, "y": 17},
+    {"part": "run-front-far-1", "x": 29, "y": 16},
+    {"part": "tail-run", "x": 0, "y": 10},
+    {"part": "body-run", "x": 6, "y": 10},
+    {"part": "head-run-a", "x": 23, "y": 5},
+    {"part": "run-hind-1", "x": 1, "y": 16},
+    {"part": "run-front-1", "x": 27, "y": 17},
+    {"part": "collar-run", "x": 25, "y": 11}
+  ],
+  "run-2": [
+    {"part": "run-hind-far-2", "x": 7, "y": 17},
+    {"part": "run-front-far-2", "x": 29, "y": 17},
+    {"part": "tail-run2", "x": 0, "y": 11},
+    {"part": "body-run", "x": 6, "y": 10},
+    {"part": "head-run-b", "x": 23, "y": 5},
+    {"part": "run-hind-2", "x": 2, "y": 16},
+    {"part": "run-front-2", "x": 27, "y": 18},
+    {"part": "collar-run", "x": 25, "y": 11}
+  ],
+  "run-3": [
+    {"part": "run-hind-far-3", "x": 12, "y": 18},
+    {"part": "run-front-far-3", "x": 22, "y": 18},
+    {"part": "tail-run", "x": 0, "y": 10},
+    {"part": "body-run", "x": 6, "y": 10},
+    {"part": "run-arch", "x": 10, "y": 10},
+    {"part": "head-run-a", "x": 23, "y": 5},
+    {"part": "run-hind-3", "x": 7, "y": 16},
+    {"part": "run-front-3", "x": 21, "y": 18},
+    {"part": "collar-run", "x": 25, "y": 11}
+  ],
+  "run-4": [
+    {"part": "run-hind-far-4", "x": 6, "y": 18},
+    {"part": "run-front-far-4", "x": 29, "y": 16},
+    {"part": "tail-run2", "x": 0, "y": 11},
+    {"part": "body-run", "x": 6, "y": 10},
+    {"part": "head-run-b", "x": 23, "y": 5},
+    {"part": "run-hind-4", "x": 2, "y": 16},
+    {"part": "run-front-4", "x": 27, "y": 17},
+    {"part": "collar-run", "x": 25, "y": 11}
+  ],
+  "scratch-1": [
+    {"part": "sit", "x": 10, "y": 10},
+    {"part": "tail-ground", "x": 1, "y": 21},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "thigh", "x": 16, "y": 15},
+    {"part": "scratch-paw-gap", "x": 18, "y": 21}
+  ],
+  "scratch-2": [
+    {"part": "sit", "x": 10, "y": 10},
+    {"part": "tail-ground", "x": 1, "y": 21},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "thigh", "x": 16, "y": 15},
+    {"part": "scratch-paw-gap", "x": 18, "y": 21}
+  ],
+  "sit-1": [
+    {"part": "sit", "x": 10, "y": 10},
+    {"part": "tail-ground", "x": 1, "y": 21},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "thigh", "x": 16, "y": 15}
+  ],
+  "slump-1": [
+    {"part": "slump", "x": 1, "y": 13},
+    {"part": "head", "x": 24, "y": 8},
+    {"part": "collar", "x": 24, "y": 13},
+    {"part": "slump-thigh", "x": 12, "y": 15}
+  ],
+  "sniff-1": [
+    {"part": "front-back", "x": 21, "y": 19, "far": true},
+    {"part": "hind-fwd", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body-low", "x": 7, "y": 10},
+    {"part": "head-down", "x": 27, "y": 12},
+    {"part": "front-fwd", "x": 26, "y": 19},
+    {"part": "hind-back", "x": 5, "y": 17},
+    {"part": "collar-low", "x": 27, "y": 12}
+  ],
+  "sniff-2": [
+    {"part": "front-fwd", "x": 23, "y": 19, "far": true},
+    {"part": "hind-back", "x": 8, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-b", "x": 0, "y": 10},
+    {"part": "body-low", "x": 7, "y": 10},
+    {"part": "head-down", "x": 27, "y": 13},
+    {"part": "front-back", "x": 24, "y": 19},
+    {"part": "hind-fwd", "x": 7, "y": 17},
+    {"part": "collar-low", "x": 27, "y": 12}
+  ],
+  "stretch-1": [
+    {"part": "stretch", "x": 6, "y": 10},
+    {"part": "tail-stretch-a", "x": 2, "y": 4},
+    {"part": "head", "x": 24, "y": 13},
+    {"part": "collar-stretch", "x": 24, "y": 18}
+  ],
+  "stretch-2": [
+    {"part": "stretch", "x": 6, "y": 10},
+    {"part": "tail-stretch-b", "x": 6, "y": 4},
+    {"part": "head", "x": 24, "y": 14},
+    {"part": "collar-stretch", "x": 24, "y": 19}
+  ],
+  "wag-1": [
+    {"part": "sit", "x": 10, "y": 10},
+    {"part": "tail-wag", "x": 3, "y": 17},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "thigh", "x": 16, "y": 15}
+  ],
+  "wag-2": [
+    {"part": "sit", "x": 10, "y": 10},
+    {"part": "tail-ground", "x": 1, "y": 21},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "thigh", "x": 16, "y": 15}
+  ],
+  "walk-1": [
+    {"part": "front-back", "x": 21, "y": 19, "far": true},
+    {"part": "hind-fwd", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-fwd", "x": 26, "y": 19},
+    {"part": "hind-back", "x": 5, "y": 17},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "walk-2": [
+    {"part": "front-up", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-b", "x": 0, "y": 10},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-up", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "walk-3": [
+    {"part": "front-fwd", "x": 23, "y": 19, "far": true},
+    {"part": "hind-back", "x": 8, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-back", "x": 24, "y": 19},
+    {"part": "hind-fwd", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "walk-4": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-up", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-b", "x": 0, "y": 10},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-up", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10}
+  ],
+  "walk-harness-1": [
+    {"part": "front-back", "x": 21, "y": 19, "far": true},
+    {"part": "hind-fwd", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-fwd", "x": 26, "y": 19},
+    {"part": "hind-back", "x": 5, "y": 17},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "harness", "x": 22, "y": 11}
+  ],
+  "walk-harness-2": [
+    {"part": "front-up", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-b", "x": 0, "y": 10},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-up", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "harness", "x": 22, "y": 11}
+  ],
+  "walk-harness-3": [
+    {"part": "front-fwd", "x": 23, "y": 19, "far": true},
+    {"part": "hind-back", "x": 8, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-back", "x": 24, "y": 19},
+    {"part": "hind-fwd", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "harness", "x": 22, "y": 11}
+  ],
+  "walk-harness-4": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-up", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-b", "x": 0, "y": 10},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-up", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "harness", "x": 22, "y": 11}
+  ],
+  "wriggle-1": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 5},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 10},
+    {"part": "tail-gap", "x": 0, "y": 8},
+    {"part": "blanket-wriggle-a", "x": 4, "y": 9}
+  ],
+  "wriggle-2": [
+    {"part": "front-mid", "x": 23, "y": 19, "far": true},
+    {"part": "hind-mid", "x": 10, "y": 17, "far": true, "skip": 2},
+    {"part": "tail-a", "x": 0, "y": 9},
+    {"part": "body", "x": 7, "y": 10},
+    {"part": "head", "x": 24, "y": 4},
+    {"part": "front-mid", "x": 26, "y": 19},
+    {"part": "hind-mid", "x": 7, "y": 17},
+    {"part": "collar", "x": 24, "y": 9},
+    {"part": "tail-gap", "x": 0, "y": 8},
+    {"part": "blanket-wriggle-b", "x": 2, "y": 11}
+  ],
+  "yard-blanket": [
+    {"part": "blanket-flat-top", "x": 7, "y": 17},
+    {"part": "blanket-flat-bottom", "x": 6, "y": 20}
+  ]
+}

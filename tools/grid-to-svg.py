@@ -3,6 +3,7 @@
 
 A grid is 25 lines of 40 characters (lines starting with ';' are comments):
   .  empty      #  fill      o  ink (+fill)      a  accent (+fill)
+  +  shade (+fill): fill dimmed halfway to the bar, for her ear and far legs
 
   tools/grid-to-svg.py                  convert every grid
   tools/grid-to-svg.py walk-1 sit-1     convert only these
@@ -20,8 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 GRIDS = ROOT / "art" / "grids"
 ART = ROOT / "art"
 W, H = 40, 25
-LAYERS = {"fill": "#oa", "ink": "o", "accent": "a"}
-PREVIEW = {"#": "#4a4f63", "o": "#111318", "a": "#d08a3c"}
+LAYERS = {"fill": "#+oa", "shade": "+", "ink": "o", "accent": "a"}
+PREVIEW = {"#": "#4a4f63", "+": "#8d909c", "o": "#111318", "a": "#d08a3c"}
 
 
 def load(path):
@@ -32,7 +33,7 @@ def load(path):
     for i, row in enumerate(rows):
         if len(row) != W:
             sys.exit(f"{path.name}: row {i} is {len(row)} wide, want {W}")
-        bad = set(row) - set(".#oa")
+        bad = set(row) - set(".#+oa")
         if bad:
             sys.exit(f"{path.name}: row {i} has unknown chars {sorted(bad)}")
     return rows

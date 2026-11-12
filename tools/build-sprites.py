@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ART = ROOT / "art"
 ASSETS = ROOT / "assets"
 CELL_W, CELL_H = 40, 25
-LAYERS = ("fill", "ink", "accent")
+LAYERS = ("fill", "shade", "ink", "accent")
 SCALES = {"1x": 1, "2x": 2}
 NAME = re.compile(r"^(?P<pose>[a-z]+(?:-[a-z]+)*?)(?:-(?P<n>\d+))?\.svg$")
 

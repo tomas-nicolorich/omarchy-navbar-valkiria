@@ -1,8 +1,8 @@
 // Draws one frame of Valkiria, themed.
 //
-// Each frame is drawn as three layers (see "Drawing Valkiria" in the README):
-// `fill` is the whole silhouette, and `ink` and `accent` are painted on top of
-// it. They are kept as separate alpha-only sheets and tinted separately, so
+// Each frame is drawn as four layers (see "Drawing Valkiria" in the README):
+// `fill` is the whole silhouette, and `shade`, `ink` and `accent` are painted
+// on top of it. They are kept as separate alpha-only sheets and tinted separately, so
 // she takes the bar's own colours and follows a theme switch without any
 // asset rebuild.
 //
@@ -96,6 +96,9 @@ Item {
   }
 
   SheetLayer { sheet: "fill"; tint: root.fillColor }
+  // Shade is the ink colour at half strength over the fill. On the bar ink is
+  // the bar's own background, so this dims the fill halfway towards it.
+  SheetLayer { sheet: "shade"; tint: root.inkColor; opacity: 0.5 }
   SheetLayer { sheet: "ink"; tint: root.inkColor }
   SheetLayer { sheet: "accent"; tint: root.accentColor }
 }
